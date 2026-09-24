@@ -12,23 +12,6 @@ For browser work, first call \`preview_status\`. If no automation-capable previe
 Do not switch to global browser skills, Chrome, Node REPL browser automation, standalone Playwright, or agent-browser merely because the preview is initially closed or a first call fails. Use an alternative browser system only when the T3 preview tools are absent, the user explicitly requests another browser, or \`preview_open\` returns an explicit unsupported/unavailable error. A failed T3 preview tool call should be inspected and retried with corrected arguments when the error is actionable.
 `;
 
-const T3_CODE_TERMINAL_TOOL_INSTRUCTIONS = `
-
-## T3 Code shared terminals
-
-When the \`t3-code\` MCP server exposes \`terminal_*\` tools, those are the product-native terminals shared with the user. They appear as panels in the user's T3 Code window, the user can type into them, and they keep running on the server after the user closes the app. Your own shell tool is private and invisible to the user by comparison.
-
-Use the \`terminal_*\` tools whenever the user asks for a terminal, asks you to run something "in a terminal", wants to watch a command, or wants to take over the session afterwards. Also prefer them for long-running or interactive processes such as dev servers, watchers, REPLs, and nested agent CLIs, since those outlive a single shell call and the user may want to interact with them.
-
-Keep using your ordinary shell tool for routine non-interactive work: reading files, running a test suite once, git commands, and anything whose output only you need. Do not route every command through a shared terminal.
-
-The usual flow is \`terminal_list\` to see what already exists, \`terminal_open\` to create or reattach, \`terminal_write\` to run a command, \`terminal_wait\` to let it finish, then \`terminal_read\` for the output. \`terminal_open\` needs an absolute \`cwd\`, and takes \`worktreePath\` when that directory lives inside a git worktree you created.
-
-When you start another agent CLI in a shared terminal, start it the way the user would: launch it interactively and send the prompt as input, rather than a one-shot non-interactive flag such as \`claude -p\` or \`codex exec\`. The point of a shared terminal is that the session stays alive for the user to read and take over, which a one-shot invocation does not give them. A one-shot run is only right when the user asked for a single answer piped back to you. After launching, do not \`terminal_wait\` for an interactive session to go idle: it will stay busy for as long as it runs.
-
-Do not fall back to desktop automation, a graphical terminal emulator, tmux, or another terminal system merely because a first call fails. Use an alternative only when the \`terminal_*\` tools are absent, the user explicitly asks for a different one, or a tool returns an explicit unsupported/unavailable error. A failed call should be inspected and retried with corrected arguments when the error is actionable.
-`;
-
 const T3_CODE_DEVICE_TOOL_INSTRUCTIONS = `
 
 ## T3 Code devices
@@ -39,6 +22,7 @@ The \`t3-code\` MCP server also exposes \`device_*\` tools for iOS Simulators an
 export interface T3CodeToolAvailability {
   readonly browser: boolean;
   readonly device: boolean;
+  readonly terminal?: boolean;
 }
 
 const normalizeAvailability = (
@@ -57,7 +41,7 @@ const browserToolInstructions = (availability: boolean | T3CodeToolAvailability)
   const tools = normalizeAvailability(availability);
   return `${tools.browser ? T3_CODE_BROWSER_TOOL_INSTRUCTIONS : ""}${
     tools.device ? T3_CODE_DEVICE_TOOL_INSTRUCTIONS : ""
-  }${T3_CODE_TERMINAL_TOOL_INSTRUCTIONS}`;
+  }`;
 };
 
 const codexPlanModeDeveloperInstructions = (
@@ -230,5 +214,10 @@ export function buildCodexDeveloperInstructions(
       : codexDefaultModeDeveloperInstructions(browserToolsAvailable);
   return `${base}
 
-${buildRuntimeInstructions({ harness: "Codex", ...runtime })}`;
+${buildRuntimeInstructions({
+  harness: "Codex",
+  ...runtime,
+  terminalTools:
+    typeof browserToolsAvailable !== "boolean" && browserToolsAvailable.terminal === true,
+})}`;
 }

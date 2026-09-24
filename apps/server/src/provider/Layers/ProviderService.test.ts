@@ -4942,14 +4942,25 @@ describe("agent browser access", () => {
   const projectId = ProjectId.make("project-browser-access");
 
   const startSessionWith = (
-    access: boolean | { readonly browser: boolean; readonly device: boolean },
+    access:
+      | boolean
+      | { readonly browser: boolean; readonly device: boolean; readonly terminal?: boolean },
     threadId: ThreadId,
-    projectOverride?: boolean | { readonly browser?: boolean; readonly device?: boolean },
-    options?: { readonly withoutOrchestration?: boolean },
+    projectOverride?:
+      | boolean
+      | { readonly browser?: boolean; readonly device?: boolean; readonly terminal?: boolean },
+    options?: {
+      readonly withoutOrchestration?: boolean;
+      readonly runtimeMode?: "full-access" | "approval-required";
+    },
   ) =>
     Effect.gen(function* () {
       const enableAgentBrowserAccess = typeof access === "boolean" ? access : access.browser;
       const enableAgentDeviceAccess = typeof access === "boolean" ? access : access.device;
+      // Terminal access is covered by its own tests; the browser and device
+      // cases keep it off so their capability sets stay focused.
+      const enableAgentTerminalAccess =
+        typeof access === "boolean" ? false : (access.terminal ?? false);
       const issued: Array<{ threadId: ThreadId; capabilities: ReadonlyArray<string> }> = [];
       const codex = makeFakeCodexAdapter();
       const providerAdapterLayer = Layer.succeed(
@@ -5026,6 +5037,7 @@ describe("agent browser access", () => {
           ServerSettings.ServerSettingsService.layerTest({
             enableAgentBrowserAccess,
             enableAgentDeviceAccess,
+            enableAgentTerminalAccess,
             projectSettingsOverrides:
               projectOverride === undefined
                 ? {}
@@ -5038,6 +5050,9 @@ describe("agent browser access", () => {
                           : {}),
                         ...(projectOverride.device !== undefined
                           ? { enableAgentDeviceAccess: projectOverride.device }
+                          : {}),
+                        ...(projectOverride.terminal !== undefined
+                          ? { enableAgentTerminalAccess: projectOverride.terminal }
                           : {}),
                       },
                     },
@@ -5059,7 +5074,7 @@ describe("agent browser access", () => {
           provider: CODEX_DRIVER,
           providerInstanceId: codexInstanceId,
           threadId,
-          runtimeMode: "full-access",
+          runtimeMode: options?.runtimeMode ?? "full-access",
         });
       }).pipe(Effect.provide(providerLayer));
 
@@ -5147,6 +5162,44 @@ describe("agent browser access", () => {
         { withoutOrchestration: true },
       );
       assert.deepEqual(issued, [{ threadId, capabilities: ["preview", "pull-requests"] }]);
+    }).pipe(Effect.provide(NodeServices.layer)),
+  );
+
+  it.effect("grants shared terminals to a full-access session when terminal access is on", () =>
+    Effect.gen(function* () {
+      const threadId = asThreadId("thread-terminal-on");
+      const issued = yield* startSessionWith(
+        { browser: false, device: false, terminal: true },
+        threadId,
+      );
+      assert.deepEqual(issued, [{ threadId, capabilities: ["pull-requests", "terminal"] }]);
+    }).pipe(Effect.provide(NodeServices.layer)),
+  );
+
+  // The terminals run outside the provider sandbox and its approval flow, so a
+  // supervised session must never get them, whatever the setting says.
+  it.effect("withholds shared terminals from sessions that are not full access", () =>
+    Effect.gen(function* () {
+      const threadId = asThreadId("thread-terminal-supervised");
+      const issued = yield* startSessionWith(
+        { browser: false, device: false, terminal: true },
+        threadId,
+        undefined,
+        { runtimeMode: "approval-required" },
+      );
+      assert.deepEqual(issued, [{ threadId, capabilities: ["pull-requests"] }]);
+    }).pipe(Effect.provide(NodeServices.layer)),
+  );
+
+  it.effect("a project can turn shared terminals off", () =>
+    Effect.gen(function* () {
+      const threadId = asThreadId("thread-project-terminal-off");
+      const issued = yield* startSessionWith(
+        { browser: false, device: false, terminal: true },
+        threadId,
+        { terminal: false },
+      );
+      assert.deepEqual(issued, [{ threadId, capabilities: ["pull-requests"] }]);
     }).pipe(Effect.provide(NodeServices.layer)),
   );
 });

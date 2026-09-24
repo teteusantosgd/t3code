@@ -428,9 +428,13 @@ it.layer(
       const { terminalId: _ignored, ...withoutId } = openInput();
 
       const opened = yield* Effect.all(
-        [manager.openNewTerminal(withoutId), manager.openNewTerminal(withoutId)],
+        [manager.openNewTerminal(withoutId, "agent"), manager.openNewTerminal(withoutId, "agent")],
         { concurrency: "unbounded" },
       );
+      assert.deepEqual(opened.map((snapshot) => snapshot.terminalId).toSorted(), [
+        "agent-1",
+        "agent-2",
+      ]);
 
       // Allocating the id outside the thread lock would let both callers pick
       // the same free id, so the second would reattach instead of spawning.

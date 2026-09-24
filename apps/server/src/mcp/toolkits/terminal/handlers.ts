@@ -9,6 +9,8 @@ import * as Option from "effect/Option";
 import * as Queue from "effect/Queue";
 import * as Ref from "effect/Ref";
 
+import { AGENT_TERMINAL_ID_PREFIX, isAgentTerminalId } from "@t3tools/shared/terminalLabels";
+
 import * as TerminalManager from "../../../terminal/Manager.ts";
 import * as McpInvocationContext from "../../McpInvocationContext.ts";
 import {
@@ -16,6 +18,8 @@ import {
   TERMINAL_READ_MAX_CHARACTERS,
   TERMINAL_WAIT_DEFAULT_QUIET_MS,
   TERMINAL_WAIT_DEFAULT_TIMEOUT_MS,
+  TERMINAL_WAIT_UNOBSERVED_QUIET_MS,
+  TerminalNotAgentOwnedError,
   TerminalToolkit,
   type TerminalCloseToolInput,
   type TerminalOpenToolInput,
@@ -28,11 +32,19 @@ import {
  * Terminal tools always act on the thread the MCP credential was minted for.
  * The thread id comes from the invocation scope and is never accepted as a tool
  * parameter, so an agent cannot name its way into another thread's terminals.
+ * The credential must also grant `terminal`, which is only minted for
+ * full-access sessions: these PTYs run outside the provider's sandbox.
  */
 const requireThreadId = Effect.fn("TerminalToolkit.requireThreadId")(function* () {
-  const invocation = yield* McpInvocationContext.McpInvocationContext;
+  const invocation = yield* McpInvocationContext.requireMcpCapability("terminal");
   return invocation.threadId;
 });
+
+/** Input and close are limited to terminals the agent opened itself. */
+const requireAgentTerminal = (threadId: string, terminalId: string) =>
+  isAgentTerminalId(terminalId)
+    ? Effect.void
+    : Effect.fail(new TerminalNotAgentOwnedError({ threadId, terminalId }));
 
 /** The roster is manager-wide, so every read is narrowed to the calling thread. */
 const readThreadTerminals = Effect.fn("TerminalToolkit.readThreadTerminals")(function* (
@@ -145,18 +157,24 @@ const waitForTerminalIdle = Effect.fn("TerminalToolkit.waitForTerminalIdle")(fun
       return yield* new TerminalSessionLookupError({ threadId, terminalId });
     }
     const latest = yield* Ref.make<TerminalSummary | null>(seed);
+    let sawRunning = seed.hasRunningSubprocess;
 
     // A quiet window only settles the wait while nothing is running; with a
     // subprocess still alive it just goes back to waiting for the next event.
+    // Until a subprocess has been seen, the window is widened so a command the
+    // subprocess poll has not picked up yet is not mistaken for a finished one.
     const settle = Effect.gen(function* () {
       for (;;) {
-        const next = yield* Queue.take(events).pipe(Effect.timeoutOption(quietMs));
+        const window = sawRunning ? quietMs : Math.max(quietMs, TERMINAL_WAIT_UNOBSERVED_QUIET_MS);
+        const next = yield* Queue.take(events).pipe(Effect.timeoutOption(window));
         if (Option.isNone(next)) {
           const terminal = yield* Ref.get(latest);
           if (terminal?.hasRunningSubprocess !== true) return;
           continue;
         }
-        yield* Ref.set(latest, applyMetadataEvent(next.value, threadId, terminalId));
+        const terminal = applyMetadataEvent(next.value, threadId, terminalId);
+        if (terminal?.hasRunningSubprocess === true) sawRunning = true;
+        yield* Ref.set(latest, terminal);
       }
     });
 
@@ -187,9 +205,12 @@ export const terminalToolkitHandlers = {
     // Allocating an id here would race a concurrent open: both callers would pick
     // the same free id and the second would silently reattach to the first
     // session. `openNewTerminal` allocates under the manager's thread lock.
+    if (input.terminalId !== undefined) {
+      yield* requireAgentTerminal(threadId, input.terminalId);
+    }
     const snapshot =
       input.terminalId === undefined
-        ? yield* manager.openNewTerminal(options)
+        ? yield* manager.openNewTerminal(options, AGENT_TERMINAL_ID_PREFIX)
         : yield* manager.open({ ...options, terminalId: input.terminalId });
     const terminalId = snapshot.terminalId;
     // `open` leaves the session in the roster; only a concurrent close can lose it.
@@ -204,6 +225,7 @@ export const terminalToolkitHandlers = {
     input: TerminalWriteToolInput,
   ) {
     const threadId = yield* requireThreadId();
+    yield* requireAgentTerminal(threadId, input.terminalId);
     const manager = yield* TerminalManager.TerminalManager;
     const endsWithNewline = input.data.endsWith("\n") || input.data.endsWith("\r");
     const submit = input.submit ?? true;
@@ -269,6 +291,7 @@ export const terminalToolkitHandlers = {
     input: TerminalCloseToolInput,
   ) {
     const threadId = yield* requireThreadId();
+    yield* requireAgentTerminal(threadId, input.terminalId);
     const manager = yield* TerminalManager.TerminalManager;
     const terminal = yield* manager.readTerminalMetadata({
       threadId,

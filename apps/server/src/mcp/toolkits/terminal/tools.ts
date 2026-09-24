@@ -1,4 +1,4 @@
-import { TerminalError, TerminalSummary } from "@t3tools/contracts";
+import { McpCapabilityUnavailableError, TerminalError, TerminalSummary } from "@t3tools/contracts";
 import * as Schema from "effect/Schema";
 import { Tool, Toolkit } from "effect/unstable/ai";
 
@@ -27,6 +27,37 @@ export const TERMINAL_WAIT_DEFAULT_TIMEOUT_MS = 30_000;
 export const TERMINAL_WAIT_DEFAULT_QUIET_MS = 1_500;
 
 /**
+ * Quiet window used until the wait has seen a subprocess at least once. The
+ * subprocess poll backs off when process inspection fails, so a command that
+ * was just written can go unobserved for longer than `quietMs`; waiting longer
+ * before trusting an idle reading keeps that from being reported as finished.
+ */
+export const TERMINAL_WAIT_UNOBSERVED_QUIET_MS = 3_000;
+
+/**
+ * Raised when the agent targets a terminal it did not open. The user's own
+ * terminals stay readable, but only `agent-N` terminals accept input or can be
+ * closed from the agent side.
+ */
+export class TerminalNotAgentOwnedError extends Schema.TaggedError<TerminalNotAgentOwnedError>()(
+  "TerminalNotAgentOwnedError",
+  {
+    threadId: Schema.String,
+    terminalId: Schema.String,
+  },
+) {
+  override get message(): string {
+    return `Terminal ${this.terminalId} belongs to the user. Only terminals you opened with terminal_open (agent-N ids) accept input or can be closed; open your own terminal instead.`;
+  }
+}
+
+export const TerminalToolError = Schema.Union([
+  McpCapabilityUnavailableError,
+  TerminalNotAgentOwnedError,
+  TerminalError,
+]);
+
+/**
  * Plain `Schema.String` rather than the trimming codec from contracts: JSON
  * schema is generated from the encoded side, so a decoding transformation would
  * drop the field descriptions the model reads.
@@ -38,7 +69,7 @@ const boundedText = (maxLength: number) =>
 
 const TerminalIdInput = boundedText(128).annotate({
   description:
-    "Terminal to target, as returned by terminal_open or terminal_list, for example term-1.",
+    "Terminal to target, as returned by terminal_open or terminal_list, for example agent-1.",
 });
 
 const TerminalColsInput = Schema.Int.check(
@@ -54,7 +85,7 @@ const TerminalRowsInput = Schema.Int.check(
 export const TerminalOpenToolInput = Schema.Struct({
   terminalId: Schema.optional(TerminalIdInput).annotate({
     description:
-      "Reattach to this exact terminal, creating it when it does not exist. Omit to allocate the lowest free term-N id.",
+      "Reattach to one of your own agent-N terminals, creating it when it does not exist. Omit to allocate the lowest free agent-N id.",
   }),
   cwd: boundedText(4_096).annotate({
     description:
@@ -186,10 +217,10 @@ const readonlyShellTool = <T extends Tool.Any>(tool: T): T =>
 export const TerminalOpenTool = shellTool(
   Tool.make("terminal_open", {
     description:
-      "Open a persistent shell in this thread's terminal drawer, where the human can watch and take over. Reattaches when terminalId already exists, otherwise spawns a new PTY in cwd. Pass worktreePath when cwd is inside a git worktree you created.",
+      "Open a persistent shell in this thread's terminal panel, where the user can watch and take over. The panel opens on the user's screen with the new terminal focused. Reattaches when terminalId names one of your existing agent-N terminals, otherwise spawns a new PTY in cwd. Pass worktreePath when cwd is inside a git worktree you created.",
     parameters: TerminalOpenToolInput,
     success: TerminalOpenToolResult,
-    failure: TerminalError,
+    failure: TerminalToolError,
     dependencies,
   })
     .annotate(Tool.Title, "Open terminal")
@@ -199,10 +230,10 @@ export const TerminalOpenTool = shellTool(
 export const TerminalWriteTool = shellTool(
   Tool.make("terminal_write", {
     description:
-      "Send input to a terminal. By default the input is submitted: a carriage return is appended unless data already ends in a newline, so pass the bare command such as 'pnpm test'. Set submit=false to send raw keystrokes without running them. Writing does not wait for the command; follow with terminal_wait and terminal_read.",
+      "Send input to one of your agent-N terminals; the user's own terminals reject input. By default the input is submitted: a carriage return is appended unless data already ends in a newline, so pass the bare command such as 'pnpm test'. Set submit=false to send raw keystrokes without running them. Writing does not wait for the command; follow with terminal_wait and terminal_read.",
     parameters: TerminalWriteToolInput,
     success: TerminalWriteToolResult,
-    failure: TerminalError,
+    failure: TerminalToolError,
     dependencies,
   }).annotate(Tool.Title, "Write to terminal"),
 );
@@ -212,7 +243,7 @@ export const TerminalReadTool = readonlyShellTool(
     description: `Read the tail of a terminal's scrollback. Returns at most ${TERMINAL_READ_DEFAULT_LINES} trailing lines by default and never more than ${TERMINAL_READ_MAX_CHARACTERS} characters, keeping the newest output and setting truncated when anything was dropped. Escape sequences are stripped unless stripAnsi=false.`,
     parameters: TerminalReadToolInput,
     success: TerminalReadToolResult,
-    failure: TerminalError,
+    failure: TerminalToolError,
     dependencies,
   }).annotate(Tool.Title, "Read terminal output"),
 );
@@ -220,10 +251,10 @@ export const TerminalReadTool = readonlyShellTool(
 export const TerminalListTool = readonlyShellTool(
   Tool.make("terminal_list", {
     description:
-      "List the live terminals for this thread with their label, status, working directory, worktree, and whether a subprocess is still running. Use it to find an existing terminal before opening another one.",
+      "List the live terminals for this thread with their label, status, working directory, worktree, and whether a subprocess is still running. agent-N terminals are yours; term-N terminals are the user's and are read-only to you. Use it to find an existing terminal before opening another one.",
     parameters: TerminalListToolInput,
     success: TerminalListToolResult,
-    failure: TerminalError,
+    failure: TerminalToolError,
     dependencies,
   }).annotate(Tool.Title, "List terminals"),
 );
@@ -233,7 +264,7 @@ export const TerminalWaitTool = readonlyShellTool(
     description: `Block until a terminal has reported no running subprocess for quietMs, or until timeoutMs elapses. Returns idle=true when the command finished and timedOut=true when it is still running, and always returns within timeoutMs (default ${TERMINAL_WAIT_DEFAULT_TIMEOUT_MS} ms).`,
     parameters: TerminalWaitToolInput,
     success: TerminalWaitToolResult,
-    failure: TerminalError,
+    failure: TerminalToolError,
     dependencies,
   }).annotate(Tool.Title, "Wait for terminal to go idle"),
 );
@@ -241,10 +272,10 @@ export const TerminalWaitTool = readonlyShellTool(
 export const TerminalCloseTool = shellTool(
   Tool.make("terminal_close", {
     description:
-      "Close a terminal and kill its shell. Idempotent: closed=false means no live terminal had that id. Set deleteHistory=true to also drop the persisted scrollback.",
+      "Close one of your agent-N terminals and kill its shell. Idempotent: closed=false means no live terminal had that id. Set deleteHistory=true to also drop the persisted scrollback.",
     parameters: TerminalCloseToolInput,
     success: TerminalCloseToolResult,
-    failure: TerminalError,
+    failure: TerminalToolError,
     dependencies,
   }).annotate(Tool.Title, "Close terminal"),
 );

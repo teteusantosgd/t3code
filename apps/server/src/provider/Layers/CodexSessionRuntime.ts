@@ -76,7 +76,11 @@ function configuredMcpToolAvailability(
   if (!hasConfiguredMcpServer(appServerArgs)) return { browser: false, device: false };
   // Callers predating the capability set attached the browser toolkit only.
   if (mcpCapabilities === undefined) return { browser: true, device: false };
-  return { browser: mcpCapabilities.has("preview"), device: mcpCapabilities.has("device") };
+  return {
+    browser: mcpCapabilities.has("preview"),
+    device: mcpCapabilities.has("device"),
+    terminal: mcpCapabilities.has("terminal"),
+  };
 }
 
 export const CodexResumeCursorSchema = Schema.Struct({

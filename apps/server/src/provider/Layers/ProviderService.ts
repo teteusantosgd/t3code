@@ -33,6 +33,7 @@ import {
   type ProviderDriverKind,
   type ProviderRuntimeEvent,
   type ProviderSession,
+  type RuntimeMode,
   type ServerSettings as ServerSettingsValue,
 } from "@t3tools/contracts";
 import { expandAssistantCitationsForProvider } from "@t3tools/shared/assistantCitations";
@@ -874,17 +875,22 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
         (entry) => entry.enableAgentBrowserAccess !== undefined,
       );
       const deviceOverridden = entries.some((entry) => entry.enableAgentDeviceAccess !== undefined);
+      const terminalOverridden = entries.some(
+        (entry) => entry.enableAgentTerminalAccess !== undefined,
+      );
       const environment = {
         browser: settings.enableAgentBrowserAccess,
         device: settings.enableAgentDeviceAccess,
+        terminal: settings.enableAgentTerminalAccess,
       };
-      if (!browserOverridden && !deviceOverridden) return environment;
+      if (!browserOverridden && !deviceOverridden && !terminalOverridden) return environment;
       // Provider-only runtimes may omit orchestration. An unresolved project
       // must not bypass an explicit project override, but a capability no
       // project overrides keeps its environment value.
       const denied = {
         browser: browserOverridden ? false : environment.browser,
         device: deviceOverridden ? false : environment.device,
+        terminal: terminalOverridden ? false : environment.terminal,
       };
       if (Option.isNone(projectionQuery)) return denied;
       const thread = yield* projectionQuery.value.getThreadShellById(threadId);
@@ -893,23 +899,29 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
       return {
         browser: resolved.enableAgentBrowserAccess,
         device: resolved.enableAgentDeviceAccess,
+        terminal: resolved.enableAgentTerminalAccess,
       };
     },
     Effect.catch((cause) =>
       Effect.logWarning(
         "Could not read server settings; withholding agent browser and device access for this session.",
         { cause },
-      ).pipe(Effect.as({ browser: false, device: false })),
+      ).pipe(Effect.as({ browser: false, device: false, terminal: false })),
     ),
   );
 
   const agentAccessCapabilities = Effect.fn("ProviderService.agentAccessCapabilities")(function* (
     threadId: ThreadId,
+    runtimeMode: RuntimeMode,
   ) {
     const capabilities = new Set<McpInvocationContext.McpCapability>(["pull-requests"]);
     const access = yield* agentAccessSettings(threadId);
     if (access.browser) capabilities.add("preview");
     if (access.device) capabilities.add("device");
+    // Shared terminals are server PTYs outside the provider's sandbox and
+    // approval flow, so only a session that already runs unsandboxed gets
+    // them. Changing runtime mode restarts the session and re-mints this.
+    if (access.terminal && runtimeMode === "full-access") capabilities.add("terminal");
     return capabilities;
   });
 
@@ -940,9 +952,13 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
     } satisfies Record<string, string>;
   });
 
-  const prepareMcpSession = (threadId: ThreadId, providerInstanceId: ProviderInstanceId) =>
+  const prepareMcpSession = (
+    threadId: ThreadId,
+    providerInstanceId: ProviderInstanceId,
+    runtimeMode: RuntimeMode,
+  ) =>
     Effect.gen(function* () {
-      const capabilities = yield* agentAccessCapabilities(threadId);
+      const capabilities = yield* agentAccessCapabilities(threadId, runtimeMode);
       const credential = yield* issueMcpCredential({ threadId, providerInstanceId, capabilities });
       if (credential) {
         const deviceEnvironment = capabilities.has("device")
@@ -1269,7 +1285,11 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
       const persistedCwd = readPersistedCwd(input.binding.runtimePayload);
       const persistedModelSelection = readPersistedModelSelection(input.binding.runtimePayload);
 
-      yield* prepareMcpSession(input.binding.threadId, bindingInstanceId);
+      yield* prepareMcpSession(
+        input.binding.threadId,
+        bindingInstanceId,
+        input.binding.runtimeMode ?? "full-access",
+      );
       const resumed = yield* adapter
         .startSession({
           threadId: input.binding.threadId,
@@ -1500,7 +1520,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
         }
         const adapter = yield* registry.getByInstance(resolvedInstanceId);
         yield* clearTurnAnalyticsSession(resolvedInstanceId, threadId);
-        yield* prepareMcpSession(threadId, resolvedInstanceId);
+        yield* prepareMcpSession(threadId, resolvedInstanceId, input.runtimeMode);
         const session = yield* adapter
           .startSession({
             ...input,

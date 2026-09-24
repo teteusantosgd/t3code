@@ -25,4 +25,16 @@ describe("buildRuntimeInstructions", () => {
     expect(instructions).toContain("through the Cursor harness.");
     expect(instructions).not.toContain("reasoning effort");
   });
+
+  it("describes shared terminals only when the session has the terminal tools", () => {
+    expect(buildRuntimeInstructions({ harness: "Claude Code" })).not.toContain("terminal_open");
+    expect(
+      buildRuntimeInstructions({ harness: "Claude Code", terminalTools: false }),
+    ).not.toContain("<shared_terminals>");
+
+    const instructions = buildRuntimeInstructions({ harness: "Claude Code", terminalTools: true });
+    expect(instructions).toContain("<shared_terminals>");
+    expect(instructions).toContain("dev servers, APIs, watchers");
+    expect(instructions).toContain("term-N terminals are read-only to you");
+  });
 });

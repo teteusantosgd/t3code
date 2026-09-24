@@ -279,13 +279,14 @@ const makeStubTerminalManager = (): StubTerminalManager => {
 
   const openNewTerminal: TerminalManager.TerminalManager["Service"]["openNewTerminal"] = (
     input,
+    idPrefix,
   ) => {
     counters.allocatedByManager += 1;
     const before = openedByName.length;
     const used = [...sessions.values()]
       .filter((session) => session.threadId === input.threadId)
       .map((session) => session.terminalId);
-    return open({ ...input, terminalId: nextTerminalId(used) }).pipe(
+    return open({ ...input, terminalId: nextTerminalId(used, idPrefix) }).pipe(
       Effect.tap(() => Effect.sync(() => openedByName.splice(before))),
     );
   };
@@ -336,7 +337,7 @@ const invocationFor = (threadId: string): McpInvocationContext.McpInvocationScop
   threadId: ThreadId.make(threadId),
   providerSessionId: "provider-session-terminal-test",
   providerInstanceId: ProviderInstanceId.make("codex"),
-  capabilities: new Set(["preview"] as const),
+  capabilities: new Set(["terminal"] as const),
   issuedAt: 1,
 });
 
@@ -348,9 +349,13 @@ const runAs = <A, E>(
     E,
     McpInvocationContext.McpInvocationContext | TerminalManager.TerminalManager
   >,
+  capabilities: ReadonlySet<McpInvocationContext.McpCapability> = new Set(["terminal"]),
 ) =>
   effect.pipe(
-    Effect.provideService(McpInvocationContext.McpInvocationContext, invocationFor(threadId)),
+    Effect.provideService(McpInvocationContext.McpInvocationContext, {
+      ...invocationFor(threadId),
+      capabilities,
+    }),
     Effect.provideService(TerminalManager.TerminalManager, stub.service),
   );
 
@@ -362,23 +367,23 @@ it.effect("opens a terminal, submits a command, and reads the output back", () =
       stub,
       terminalToolkitHandlers.terminal_open({ cwd: "/repo", worktreePath: "/repo/wt" }),
     );
-    expect(opened.terminalId).toBe("term-1");
+    expect(opened.terminalId).toBe("agent-1");
     expect(opened.terminal.cwd).toBe("/repo");
     expect(opened.terminal.worktreePath).toBe("/repo/wt");
 
     const written = yield* runAs(
       "thread-a",
       stub,
-      terminalToolkitHandlers.terminal_write({ terminalId: "term-1", data: "pnpm test" }),
+      terminalToolkitHandlers.terminal_write({ terminalId: "agent-1", data: "pnpm test" }),
     );
     expect(written.submitted).toBe(true);
-    expect(stub.writes).toEqual([{ terminalId: "term-1", data: "pnpm test\r" }]);
+    expect(stub.writes).toEqual([{ terminalId: "agent-1", data: "pnpm test\r" }]);
 
-    yield* stub.emitOutput("thread-a", "term-1", "\n3 passed\n");
+    yield* stub.emitOutput("thread-a", "agent-1", "\n3 passed\n");
     const read = yield* runAs(
       "thread-a",
       stub,
-      terminalToolkitHandlers.terminal_read({ terminalId: "term-1" }),
+      terminalToolkitHandlers.terminal_read({ terminalId: "agent-1" }),
     );
     expect(read.output).toBe("pnpm test\n3 passed\n");
     expect(read.truncated).toBe(false);
@@ -402,18 +407,18 @@ it.effect("allocates the lowest free terminal id and reattaches to a named one",
     const reattached = yield* runAs(
       "thread-a",
       stub,
-      terminalToolkitHandlers.terminal_open({ cwd: "/repo", terminalId: "term-1" }),
+      terminalToolkitHandlers.terminal_open({ cwd: "/repo", terminalId: "agent-1" }),
     );
     expect([first.terminalId, second.terminalId, reattached.terminalId]).toEqual([
-      "term-1",
-      "term-2",
-      "term-1",
+      "agent-1",
+      "agent-2",
+      "agent-1",
     ]);
 
     const listed = yield* runAs("thread-a", stub, terminalToolkitHandlers.terminal_list());
     expect(listed.terminals.map((terminal) => terminal.terminalId).sort()).toEqual([
-      "term-1",
-      "term-2",
+      "agent-1",
+      "agent-2",
     ]);
   }),
 );
@@ -433,10 +438,10 @@ it.effect("delegates id allocation for an unnamed open to the manager", () =>
     yield* runAs(
       "thread-a",
       stub,
-      terminalToolkitHandlers.terminal_open({ cwd: "/repo", terminalId: "term-9" }),
+      terminalToolkitHandlers.terminal_open({ cwd: "/repo", terminalId: "agent-9" }),
     );
     expect(stub.allocatedByManager).toBe(1);
-    expect(stub.openedByName).toEqual(["term-9"]);
+    expect(stub.openedByName).toEqual(["agent-9"]);
   }),
 );
 
@@ -444,7 +449,7 @@ it.effect("refuses to report a write as submitted once the shell has exited", ()
   Effect.gen(function* () {
     const stub = makeStubTerminalManager();
     yield* runAs("thread-a", stub, terminalToolkitHandlers.terminal_open({ cwd: "/repo" }));
-    stub.markExited("thread-a", "term-1");
+    stub.markExited("thread-a", "agent-1");
 
     // TerminalManager.write is a deliberate no-op for an exited session, so a
     // blind write would tell the agent a command ran when nothing received it.
@@ -452,7 +457,7 @@ it.effect("refuses to report a write as submitted once the shell has exited", ()
       runAs(
         "thread-a",
         stub,
-        terminalToolkitHandlers.terminal_write({ terminalId: "term-1", data: "ls" }),
+        terminalToolkitHandlers.terminal_write({ terminalId: "agent-1", data: "ls" }),
       ),
     );
     expect(result._tag).toBe("Failure");
@@ -468,13 +473,13 @@ it.effect("leaves input unsubmitted when submit is false", () =>
       "thread-a",
       stub,
       terminalToolkitHandlers.terminal_write({
-        terminalId: "term-1",
+        terminalId: "agent-1",
         data: "\u0003",
         submit: false,
       }),
     );
     expect(written.submitted).toBe(false);
-    expect(stub.writes).toEqual([{ terminalId: "term-1", data: "\u0003" }]);
+    expect(stub.writes).toEqual([{ terminalId: "agent-1", data: "\u0003" }]);
   }),
 );
 
@@ -484,14 +489,14 @@ it.effect("bounds read output to the requested trailing lines", () =>
     yield* runAs("thread-a", stub, terminalToolkitHandlers.terminal_open({ cwd: "/repo" }));
     yield* stub.emitOutput(
       "thread-a",
-      "term-1",
+      "agent-1",
       Array.from({ length: 10 }, (_, index) => `line-${index}`).join("\n"),
     );
 
     const bounded = yield* runAs(
       "thread-a",
       stub,
-      terminalToolkitHandlers.terminal_read({ terminalId: "term-1", lines: 3 }),
+      terminalToolkitHandlers.terminal_read({ terminalId: "agent-1", lines: 3 }),
     );
     expect(bounded.output).toBe("line-7\nline-8\nline-9");
     expect(bounded.lines).toBe(3);
@@ -503,21 +508,21 @@ it.effect("reports idle once the terminal has been quiet for the settle window",
   Effect.gen(function* () {
     const stub = makeStubTerminalManager();
     yield* runAs("thread-a", stub, terminalToolkitHandlers.terminal_open({ cwd: "/repo" }));
-    yield* stub.setSubprocess("thread-a", "term-1", true);
+    yield* stub.setSubprocess("thread-a", "agent-1", true);
 
     const waiting = yield* Effect.forkChild(
       runAs(
         "thread-a",
         stub,
         terminalToolkitHandlers.terminal_wait({
-          terminalId: "term-1",
+          terminalId: "agent-1",
           timeoutMs: 30_000,
           quietMs: 1_500,
         }),
       ),
     );
     yield* TestClock.adjust("5000 millis");
-    yield* stub.setSubprocess("thread-a", "term-1", false);
+    yield* stub.setSubprocess("thread-a", "agent-1", false);
     yield* TestClock.adjust("1500 millis");
 
     const result = yield* Fiber.join(waiting);
@@ -531,14 +536,14 @@ it.effect("gives up at the timeout while a subprocess is still running", () =>
   Effect.gen(function* () {
     const stub = makeStubTerminalManager();
     yield* runAs("thread-a", stub, terminalToolkitHandlers.terminal_open({ cwd: "/repo" }));
-    yield* stub.setSubprocess("thread-a", "term-1", true);
+    yield* stub.setSubprocess("thread-a", "agent-1", true);
 
     const waiting = yield* Effect.forkChild(
       runAs(
         "thread-a",
         stub,
         terminalToolkitHandlers.terminal_wait({
-          terminalId: "term-1",
+          terminalId: "agent-1",
           timeoutMs: 5_000,
           quietMs: 1_500,
         }),
@@ -559,7 +564,7 @@ it.effect("fails to wait on a terminal that does not exist", () =>
     const error = yield* runAs(
       "thread-a",
       stub,
-      terminalToolkitHandlers.terminal_wait({ terminalId: "term-9" }),
+      terminalToolkitHandlers.terminal_wait({ terminalId: "agent-9" }),
     ).pipe(Effect.flip);
     expect(error._tag).toBe("TerminalSessionLookupError");
   }),
@@ -568,7 +573,7 @@ it.effect("fails to wait on a terminal that does not exist", () =>
 it.effect("never reaches a terminal owned by another thread", () =>
   Effect.gen(function* () {
     const stub = makeStubTerminalManager();
-    yield* stub.service.open({ threadId: "thread-b", terminalId: "term-1", cwd: "/repo-b" });
+    yield* stub.service.open({ threadId: "thread-b", terminalId: "agent-1", cwd: "/repo-b" });
 
     const listed = yield* runAs("thread-a", stub, terminalToolkitHandlers.terminal_list());
     expect(listed.terminals).toEqual([]);
@@ -576,7 +581,7 @@ it.effect("never reaches a terminal owned by another thread", () =>
     const readError = yield* runAs(
       "thread-a",
       stub,
-      terminalToolkitHandlers.terminal_read({ terminalId: "term-1" }),
+      terminalToolkitHandlers.terminal_read({ terminalId: "agent-1" }),
     ).pipe(Effect.flip);
     expect(readError).toMatchObject({
       _tag: "TerminalSessionLookupError",
@@ -586,7 +591,7 @@ it.effect("never reaches a terminal owned by another thread", () =>
     const writeError = yield* runAs(
       "thread-a",
       stub,
-      terminalToolkitHandlers.terminal_write({ terminalId: "term-1", data: "rm -rf /" }),
+      terminalToolkitHandlers.terminal_write({ terminalId: "agent-1", data: "rm -rf /" }),
     ).pipe(Effect.flip);
     expect(writeError._tag).toBe("TerminalSessionLookupError");
     expect(stub.writes).toEqual([]);
@@ -594,12 +599,12 @@ it.effect("never reaches a terminal owned by another thread", () =>
     const closed = yield* runAs(
       "thread-a",
       stub,
-      terminalToolkitHandlers.terminal_close({ terminalId: "term-1" }),
+      terminalToolkitHandlers.terminal_close({ terminalId: "agent-1" }),
     );
     expect(closed.closed).toBe(false);
 
     const survivors = yield* runAs("thread-b", stub, terminalToolkitHandlers.terminal_list());
-    expect(survivors.terminals.map((terminal) => terminal.terminalId)).toEqual(["term-1"]);
+    expect(survivors.terminals.map((terminal) => terminal.terminalId)).toEqual(["agent-1"]);
   }),
 );
 
@@ -611,15 +616,108 @@ it.effect("closes a terminal once and then reports it as already gone", () =>
     const first = yield* runAs(
       "thread-a",
       stub,
-      terminalToolkitHandlers.terminal_close({ terminalId: "term-1" }),
+      terminalToolkitHandlers.terminal_close({ terminalId: "agent-1" }),
     );
     const second = yield* runAs(
       "thread-a",
       stub,
-      terminalToolkitHandlers.terminal_close({ terminalId: "term-1" }),
+      terminalToolkitHandlers.terminal_close({ terminalId: "agent-1" }),
     );
     expect([first.closed, second.closed]).toEqual([true, false]);
   }),
+);
+
+it.effect("refuses every tool when the credential does not grant terminal", () =>
+  Effect.gen(function* () {
+    const stub = makeStubTerminalManager();
+    const error = yield* runAs(
+      "thread-a",
+      stub,
+      terminalToolkitHandlers.terminal_open({ cwd: "/repo" }),
+      new Set(["preview", "pull-requests"]),
+    ).pipe(Effect.flip);
+    expect(error).toMatchObject({ _tag: "McpCapabilityUnavailableError", capability: "terminal" });
+    const listError = yield* runAs(
+      "thread-a",
+      stub,
+      terminalToolkitHandlers.terminal_list(),
+      new Set(["pull-requests"]),
+    ).pipe(Effect.flip);
+    expect(listError._tag).toBe("McpCapabilityUnavailableError");
+    expect(stub.allocatedByManager).toBe(0);
+  }),
+);
+
+it.effect("reads the user's terminals but never writes to, reopens, or closes them", () =>
+  Effect.gen(function* () {
+    const stub = makeStubTerminalManager();
+    yield* stub.service.open({ threadId: "thread-a", terminalId: "term-1", cwd: "/repo" });
+    yield* stub.emitOutput("thread-a", "term-1", "error: port in use\n");
+
+    const read = yield* runAs(
+      "thread-a",
+      stub,
+      terminalToolkitHandlers.terminal_read({ terminalId: "term-1" }),
+    );
+    expect(read.output).toContain("port in use");
+
+    const writeError = yield* runAs(
+      "thread-a",
+      stub,
+      terminalToolkitHandlers.terminal_write({ terminalId: "term-1", data: "ls" }),
+    ).pipe(Effect.flip);
+    expect(writeError._tag).toBe("TerminalNotAgentOwnedError");
+    expect(stub.writes).toEqual([]);
+
+    const openError = yield* runAs(
+      "thread-a",
+      stub,
+      terminalToolkitHandlers.terminal_open({ cwd: "/repo", terminalId: "term-1" }),
+    ).pipe(Effect.flip);
+    expect(openError._tag).toBe("TerminalNotAgentOwnedError");
+
+    const closeError = yield* runAs(
+      "thread-a",
+      stub,
+      terminalToolkitHandlers.terminal_close({ terminalId: "term-1" }),
+    ).pipe(Effect.flip);
+    expect(closeError._tag).toBe("TerminalNotAgentOwnedError");
+
+    const listed = yield* runAs("thread-a", stub, terminalToolkitHandlers.terminal_list());
+    expect(listed.terminals.map((terminal) => terminal.terminalId)).toEqual(["term-1"]);
+  }),
+);
+
+it.effect("does not call a just-written command idle before its subprocess is observed", () =>
+  Effect.gen(function* () {
+    const stub = makeStubTerminalManager();
+    yield* runAs("thread-a", stub, terminalToolkitHandlers.terminal_open({ cwd: "/repo" }));
+
+    let settled = false;
+    const waiting = yield* Effect.forkChild(
+      runAs(
+        "thread-a",
+        stub,
+        terminalToolkitHandlers.terminal_wait({
+          terminalId: "agent-1",
+          timeoutMs: 30_000,
+          quietMs: 1_500,
+        }),
+      ).pipe(Effect.tap(() => Effect.sync(() => (settled = true)))),
+    );
+    // Past quietMs but inside the unobserved window: a slow subprocess poll
+    // must not let the wait settle yet.
+    yield* TestClock.adjust("2000 millis");
+    expect(settled).toBe(false);
+    yield* stub.setSubprocess("thread-a", "agent-1", true);
+    yield* TestClock.adjust("10000 millis");
+    yield* stub.setSubprocess("thread-a", "agent-1", false);
+    yield* TestClock.adjust("1500 millis");
+
+    const result = yield* Fiber.join(waiting);
+    expect(result.idle).toBe(true);
+    expect(result.terminal?.hasRunningSubprocess).toBe(false);
+  }).pipe(Effect.provide(TestClock.layer())),
 );
 
 it("keeps only the final text of lines the shell rewrote in place", () => {

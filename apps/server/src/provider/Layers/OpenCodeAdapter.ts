@@ -3283,6 +3283,7 @@ export function makeOpenCodeAdapter(
                     system: buildRuntimeInstructions({
                       harness: "OpenCode",
                       model: `${parsedModel.providerID}/${parsedModel.modelID}`,
+                      terminalTools: McpProviderSession.hasTerminalTools(input.threadId),
                     }),
                     parts: [...(text ? [{ type: "text" as const, text }] : []), ...fileParts],
                   },

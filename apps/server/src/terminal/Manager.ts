@@ -166,6 +166,7 @@ export class TerminalManager extends Context.Service<
      */
     readonly openNewTerminal: (
       input: Omit<TerminalOpenInput, "terminalId">,
+      idPrefix: string,
     ) => Effect.Effect<TerminalSessionSnapshot, TerminalError>;
 
     /**
@@ -2692,7 +2693,7 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
       resolveLaunchInputEnvironment(input).pipe(Effect.flatMap(openLocked)),
     );
 
-  const openNewTerminal: TerminalManager["Service"]["openNewTerminal"] = (input) =>
+  const openNewTerminal: TerminalManager["Service"]["openNewTerminal"] = (input, idPrefix) =>
     withThreadLock(
       input.threadId,
       Effect.gen(function* () {
@@ -2700,7 +2701,7 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
         const usedIds = [...state.sessions.values()]
           .filter((session) => session.threadId === input.threadId)
           .map((session) => session.terminalId);
-        return yield* openLocked({ ...input, terminalId: nextTerminalId(usedIds) });
+        return yield* openLocked({ ...input, terminalId: nextTerminalId(usedIds, idPrefix) });
       }),
     );
 

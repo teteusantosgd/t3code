@@ -7,7 +7,7 @@ export interface McpProviderSessionConfig {
   readonly providerInstanceId: ProviderInstanceId;
   readonly endpoint: string;
   readonly authorizationHeader: string;
-  /** Capabilities the credential grants ("preview", "device"). */
+  /** Capabilities the credential grants ("preview", "device", "terminal"). */
   readonly capabilities: ReadonlySet<string>;
   /**
    * Set when the session may drive devices. Adapters spread this into the
@@ -42,6 +42,11 @@ export function setMcpProviderSession(config: McpProviderSessionConfig): void {
 
 export function readMcpProviderSession(threadId: ThreadId): McpProviderSessionConfig | undefined {
   return sessionsByThread.get(threadId);
+}
+
+/** Whether the thread's MCP credential grants the shared `terminal_*` tools. */
+export function hasTerminalTools(threadId: ThreadId): boolean {
+  return sessionsByThread.get(threadId)?.capabilities.has("terminal") === true;
 }
 
 export function clearMcpProviderSession(threadId: ThreadId): void {
