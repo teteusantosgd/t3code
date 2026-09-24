@@ -561,6 +561,13 @@ export const SETTINGS_SEARCH_ITEMS = [
     searchTerms: ["allow disable enable open drive preview tools sessions project override"],
   },
   {
+    id: "agent-terminal-access",
+    title: "Agent terminal access",
+    to: "/settings/integrations",
+    scope: "project-defaults",
+    searchTerms: ["allow disable enable shell pty dev server watch run commands full access"],
+  },
+  {
     id: "device-hosts",
     title: "Device hosts",
     to: "/settings/integrations",

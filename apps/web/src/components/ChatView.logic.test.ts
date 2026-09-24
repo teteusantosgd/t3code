@@ -51,6 +51,7 @@ import {
   shouldRefocusComposerOnWindowFocus,
   isBranchMismatchDismissedForSession,
   reconcileMountedTerminalThreadIds,
+  selectAgentTerminalsToReveal,
   recallCheckoutIsRepo,
   rememberCheckoutIsRepo,
   resolveBackgroundDraftWorkspaceOptions,
@@ -2428,5 +2429,29 @@ describe("worktree setup visibility", () => {
       ...settledDone,
       sequence: 9,
     });
+  });
+});
+
+describe("selectAgentTerminalsToReveal", () => {
+  it("records existing terminals on the first observation without revealing them", () => {
+    const first = selectAgentTerminalsToReveal(undefined, ["term-1", "agent-1"]);
+    expect(first.reveal).toEqual([]);
+    expect([...first.seen]).toEqual(["term-1", "agent-1"]);
+  });
+
+  it("reveals only agent terminals that appeared since the last observation", () => {
+    const next = selectAgentTerminalsToReveal(new Set(["term-1", "agent-1"]), [
+      "term-1",
+      "term-2",
+      "agent-1",
+      "agent-2",
+    ]);
+    expect(next.reveal).toEqual(["agent-2"]);
+    expect(next.seen.has("term-2")).toBe(true);
+  });
+
+  it("reveals an agent terminal again after it was closed and reopened", () => {
+    const closed = selectAgentTerminalsToReveal(new Set(["agent-1"]), []);
+    expect(selectAgentTerminalsToReveal(closed.seen, ["agent-1"]).reveal).toEqual(["agent-1"]);
   });
 });

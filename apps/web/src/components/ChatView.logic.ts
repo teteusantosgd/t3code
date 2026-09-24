@@ -25,6 +25,7 @@ import {
   squashAtomCommandFailure,
   type AtomCommandResult,
 } from "@t3tools/client-runtime/state/runtime";
+import { isAgentTerminalId } from "@t3tools/shared/terminalLabels";
 import { videoMimeType } from "@t3tools/shared/video";
 import {
   appendCodexArtifactTemplateUsePrompt,
@@ -685,6 +686,26 @@ export function reconcileMountedTerminalThreadIds(input: {
   }
 
   return nextThreadIds;
+}
+
+/**
+ * Agent terminals (`agent-N`) the right panel should reveal: ids that appeared
+ * since the last observation of the thread. The first observation, which only
+ * happens once terminal metadata has loaded, just records what already exists,
+ * so opening a thread does not pop terminals the agent started earlier.
+ */
+export function selectAgentTerminalsToReveal(
+  seenTerminalIds: ReadonlySet<string> | undefined,
+  terminalIds: ReadonlyArray<string>,
+): { readonly reveal: ReadonlyArray<string>; readonly seen: ReadonlySet<string> } {
+  const seen = new Set(terminalIds);
+  if (seenTerminalIds === undefined) return { reveal: [], seen };
+  return {
+    reveal: terminalIds.filter(
+      (terminalId) => isAgentTerminalId(terminalId) && !seenTerminalIds.has(terminalId),
+    ),
+    seen,
+  };
 }
 
 export function revokeBlobPreviewUrl(previewUrl: string | undefined): void {

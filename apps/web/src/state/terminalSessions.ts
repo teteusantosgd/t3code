@@ -175,6 +175,19 @@ export function useKnownTerminalSessions(input: {
   );
 }
 
+/** Whether the environment's terminal roster has arrived, as opposed to being empty. */
+export function useTerminalMetadataLoaded(environmentId: EnvironmentId | null): boolean {
+  const metadata = useEnvironmentQuery(
+    environmentId === null
+      ? null
+      : terminalEnvironment.metadata({
+          environmentId,
+          input: null,
+        }),
+  );
+  return metadata.data !== null && metadata.data !== undefined;
+}
+
 export function useThreadRunningTerminalIds(input: {
   readonly environmentId: EnvironmentId | null;
   readonly threadId: ThreadId | null;

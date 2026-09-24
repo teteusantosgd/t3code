@@ -335,7 +335,11 @@ import { environmentCatalog } from "../connection/catalog";
 import { isDesktopLocalConnectionTarget } from "../connection/desktopLocal";
 import { useEnvironmentDisconnectDelay } from "../hooks/useEnvironmentDisconnectDelay";
 import { selectThreadTerminalUiState, useTerminalUiStateStore } from "../terminalUiStateStore";
-import { useKnownTerminalSessions, useThreadRunningTerminalIds } from "../state/terminalSessions";
+import {
+  useKnownTerminalSessions,
+  useTerminalMetadataLoaded,
+  useThreadRunningTerminalIds,
+} from "../state/terminalSessions";
 import { useEnvironmentQuery } from "../state/query";
 import {
   environmentServerConfigsAtom,
@@ -450,6 +454,7 @@ import {
   prepareRevertedMessageAttachments,
   waitForRevertedMessage,
   reconcileMountedTerminalThreadIds,
+  selectAgentTerminalsToReveal,
   recallCheckoutIsRepo,
   rememberCheckoutIsRepo,
   resolveBackgroundDraftWorkspaceOptions,
@@ -2042,6 +2047,21 @@ export default function ChatView(props: ChatViewProps) {
     () => [...new Set([...activeKnownTerminalIds, ...panelTerminalIds])],
     [activeKnownTerminalIds, panelTerminalIds],
   );
+  // Terminals an agent opens through the terminal_* MCP tools are meant to be
+  // watched, so a new one opens in the right panel instead of waiting for the
+  // user to go looking for it. Focus stays where it is: the user may be typing.
+  const terminalMetadataLoaded = useTerminalMetadataLoaded(activeThread?.environmentId ?? null);
+  const seenAgentTerminalIdsRef = useRef(new Map<string, ReadonlySet<string>>());
+  useEffect(() => {
+    if (!activeThreadRef || !activeThreadKey || !terminalMetadataLoaded) return;
+    const { reveal, seen } = selectAgentTerminalsToReveal(
+      seenAgentTerminalIdsRef.current.get(activeThreadKey),
+      activeServerOrderedTerminalIds,
+    );
+    seenAgentTerminalIdsRef.current.set(activeThreadKey, seen);
+    const newest = reveal.at(-1);
+    if (newest) useRightPanelStore.getState().openTerminal(activeThreadRef, newest);
+  }, [activeServerOrderedTerminalIds, activeThreadKey, activeThreadRef, terminalMetadataLoaded]);
   const previewPanelOpen = activeRightPanelKind === "preview" && isPreviewSupportedInRuntime();
   const rightPanelOpen = rightPanelState.isOpen;
   const { active: panelAnimationsActive, durationMs: panelAnimationDurationMs } =
