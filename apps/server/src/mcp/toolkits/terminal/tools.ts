@@ -217,7 +217,7 @@ const readonlyShellTool = <T extends Tool.Any>(tool: T): T =>
 export const TerminalOpenTool = shellTool(
   Tool.make("terminal_open", {
     description:
-      "Open a persistent shell in this thread's terminal panel, where the user can watch and take over. The panel opens on the user's screen with the new terminal focused. Reattaches when terminalId names one of your existing agent-N terminals, otherwise spawns a new PTY in cwd. Pass worktreePath when cwd is inside a git worktree you created.",
+      "Open a persistent shell in this thread's terminal panel, where the user can watch and take over. The panel opens on the user's screen with the new terminal focused. Use this, not your own shell or exec tool, whenever you start something that keeps running: dev servers, APIs, watchers, workers, or anything the user wants to follow. Reattaches when terminalId names one of your existing agent-N terminals, otherwise spawns a new PTY in cwd. Pass worktreePath when cwd is inside a git worktree you created.",
     parameters: TerminalOpenToolInput,
     success: TerminalOpenToolResult,
     failure: TerminalToolError,
@@ -230,7 +230,7 @@ export const TerminalOpenTool = shellTool(
 export const TerminalWriteTool = shellTool(
   Tool.make("terminal_write", {
     description:
-      "Send input to one of your agent-N terminals; the user's own terminals reject input. By default the input is submitted: a carriage return is appended unless data already ends in a newline, so pass the bare command such as 'pnpm test'. Set submit=false to send raw keystrokes without running them. Writing does not wait for the command; follow with terminal_wait and terminal_read.",
+      "Send input to one of your agent-N terminals; the user's own terminals reject input. This is how to start servers, APIs, and watchers where the user can see them; never start those in your own shell's background. By default the input is submitted: a carriage return is appended unless data already ends in a newline, so pass the bare command such as 'pnpm test'. Set submit=false to send raw keystrokes without running them. Writing does not wait for the command; follow with terminal_wait and terminal_read.",
     parameters: TerminalWriteToolInput,
     success: TerminalWriteToolResult,
     failure: TerminalToolError,

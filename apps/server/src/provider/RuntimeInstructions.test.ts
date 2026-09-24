@@ -34,7 +34,7 @@ describe("buildRuntimeInstructions", () => {
 
     const instructions = buildRuntimeInstructions({ harness: "Claude Code", terminalTools: true });
     expect(instructions).toContain("<shared_terminals>");
-    expect(instructions).toContain("dev servers, APIs, watchers");
+    expect(instructions).toContain("MUST be started with terminal_open plus terminal_write");
     expect(instructions).toContain("term-N terminals are read-only to you");
   });
 });

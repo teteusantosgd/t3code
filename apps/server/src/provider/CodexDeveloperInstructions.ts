@@ -19,6 +19,15 @@ const T3_CODE_DEVICE_TOOL_INSTRUCTIONS = `
 The \`t3-code\` MCP server also exposes \`device_*\` tools for iOS Simulators and Android Emulators on this environment. For mobile verification, call \`device_list\`, then \`device_open\` so the user can watch the device in their Device panel; its result explains how to drive the device. Driving happens through the \`agent-device\` CLI, which is on PATH. Keep the host config and session flags returned by \`device_open\` on every command so concurrent devices stay independent: prefer \`agent-device snapshot -i\` refs over coordinates, and use \`device_screenshot\` when you need to see the screen. Do not call simctl, adb, xcrun, or serve-sim directly while these tools are present. If \`device_list\` reports a platform as unavailable, say so instead of trying another route.
 `;
 
+const T3_CODE_TERMINAL_TOOL_INSTRUCTIONS = `
+
+## T3 Code shared terminals
+
+The \`t3-code\` MCP server exposes \`mcp__t3_code__terminal_*\` tools: shared terminals in the user's T3 Code terminal panel, which the user watches and can type into. \`exec_command\` runs out of the user's sight.
+
+Any process that keeps running after the command returns (dev servers, APIs, \`npm start\`, \`npm run dev\`, watchers, workers, REPLs) must be started with \`mcp__t3_code__terminal_open\` and \`mcp__t3_code__terminal_write\`, never with \`exec_command\`, not even with a short \`yield_time_ms\`. Then poll \`mcp__t3_code__terminal_read\` until it is ready. Keep \`exec_command\` for commands that finish on their own, such as curl against that server.
+`;
+
 export interface T3CodeToolAvailability {
   readonly browser: boolean;
   readonly device: boolean;
@@ -41,7 +50,7 @@ const browserToolInstructions = (availability: boolean | T3CodeToolAvailability)
   const tools = normalizeAvailability(availability);
   return `${tools.browser ? T3_CODE_BROWSER_TOOL_INSTRUCTIONS : ""}${
     tools.device ? T3_CODE_DEVICE_TOOL_INSTRUCTIONS : ""
-  }`;
+  }${tools.terminal === true ? T3_CODE_TERMINAL_TOOL_INSTRUCTIONS : ""}`;
 };
 
 const codexPlanModeDeveloperInstructions = (
