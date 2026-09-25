@@ -53,6 +53,7 @@ import * as TestClock from "effect/testing/TestClock";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 
 import {
+  ProviderAdapterProcessError,
   ProviderAdapterRequestError,
   ProviderAdapterSessionNotFoundError,
   ProviderUnsupportedError,
@@ -80,6 +81,7 @@ import { makeAdapterRegistryMock } from "../testUtils/providerAdapterRegistryMoc
 import * as ProjectionSnapshotQuery from "../../orchestration/Services/ProjectionSnapshotQuery.ts";
 
 const encodeJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
+const isProviderAdapterProcessError = Schema.is(ProviderAdapterProcessError);
 const defaultServerSettingsLayer = ServerSettings.ServerSettingsService.layerTest();
 const serverConfigTestLayer = ServerConfig.layerTest(process.cwd(), process.cwd()).pipe(
   Layer.provide(NodeServices.layer),
@@ -1177,6 +1179,186 @@ antigravityInstanceRouting.layer("ProviderServiceLive instance-owned conversatio
           }
         }
       }),
+  );
+});
+
+// Two Codex instances over one Codex home (a direct login and one routed through
+// a proxy, or a shadow-home account) share a continuation key, so a thread may
+// move between them. Codex allows one writer per native thread.
+const sharedCodexHomeKey = "codex:home:/Users/example/.codex";
+const codexIrisInstanceId = ProviderInstanceId.make("codex_iris");
+const handoffSource = makeFakeCodexAdapter();
+const handoffTarget = makeFakeCodexAdapter();
+function makeSharedHomeRegistry(
+  entries: ReadonlyArray<readonly [ProviderInstanceId, ProviderAdapterShape<ProviderAdapterError>]>,
+): ProviderAdapterRegistry.ProviderAdapterRegistry["Service"] {
+  const base = makeStaticInstanceRegistry(entries);
+  return {
+    ...base,
+    getInstanceInfo: (instanceId) =>
+      base.getInstanceInfo(instanceId).pipe(
+        Effect.map((info) => ({
+          ...info,
+          continuationIdentity: {
+            ...info.continuationIdentity,
+            continuationKey: sharedCodexHomeKey,
+          },
+        })),
+      ),
+  };
+}
+const handoff = makeProviderServiceLayer({
+  registry: makeSharedHomeRegistry([
+    [codexInstanceId, handoffSource.adapter],
+    [codexIrisInstanceId, handoffTarget.adapter],
+  ]),
+});
+handoff.layer("ProviderServiceLive compatible instance handoff", (it) => {
+  const startOn = (
+    instanceId: ProviderInstanceId,
+    threadId: ThreadId,
+    extra?: { readonly cwd?: string; readonly resumeCursor?: unknown },
+  ) =>
+    Effect.flatMap(ProviderService.ProviderService, (provider) =>
+      provider.startSession(threadId, {
+        provider: CODEX_DRIVER,
+        providerInstanceId: instanceId,
+        threadId,
+        runtimeMode: "full-access",
+        ...(extra?.cwd !== undefined ? { cwd: extra.cwd } : {}),
+        ...(extra?.resumeCursor !== undefined ? { resumeCursor: extra.resumeCursor } : {}),
+      }),
+    );
+
+  it.effect("releases the previous instance before the replacement resumes the conversation", () =>
+    Effect.gen(function* () {
+      const provider = yield* ProviderService.ProviderService;
+      const directory = yield* ProviderSessionDirectory.ProviderSessionDirectory;
+      const threadId = asThreadId("thread-handoff-live");
+      const cwd = fixtureCwd("project-handoff-live");
+      const source = yield* startOn(codexInstanceId, threadId, { cwd });
+
+      const order: Array<string> = [];
+      const stopSource = handoffSource.stopSession.getMockImplementation()!;
+      handoffSource.stopSession.mockImplementationOnce((id) =>
+        stopSource(id).pipe(Effect.tap(() => Effect.sync(() => order.push("stop:codex")))),
+      );
+      const startTarget = handoffTarget.startSession.getMockImplementation()!;
+      handoffTarget.startSession.mockImplementationOnce((input) =>
+        startTarget(input).pipe(
+          Effect.tap(() => Effect.sync(() => order.push("start:codex_iris"))),
+        ),
+      );
+
+      const replacement = yield* startOn(codexIrisInstanceId, threadId, {
+        cwd,
+        resumeCursor: source.resumeCursor,
+      });
+
+      assert.deepEqual(order, ["stop:codex", "start:codex_iris"]);
+      assert.equal(handoffSource.stopSession.mock.calls.length, 1);
+      assert.equal(replacement.providerInstanceId, codexIrisInstanceId);
+      assert.deepEqual(replacement.resumeCursor, source.resumeCursor);
+      const binding = yield* directory.getBinding(threadId);
+      assert(Option.isSome(binding));
+      assert.equal(binding.value.providerInstanceId, codexIrisInstanceId);
+      assert.deepEqual(binding.value.resumeCursor, source.resumeCursor);
+      const live = (yield* provider.listSessions()).filter((s) => s.threadId === threadId);
+      assert.deepEqual(
+        live.map((s) => s.providerInstanceId),
+        [codexIrisInstanceId],
+      );
+      yield* provider.stopSession({ threadId });
+    }),
+  );
+
+  it.effect("continues a stopped thread on the other instance with the persisted cursor", () =>
+    Effect.gen(function* () {
+      const provider = yield* ProviderService.ProviderService;
+      const threadId = asThreadId("thread-handoff-stopped");
+      const cwd = fixtureCwd("project-handoff-stopped");
+      const source = yield* startOn(codexInstanceId, threadId, { cwd });
+      yield* provider.stopSession({ threadId });
+      handoffTarget.startSession.mockClear();
+
+      const replacement = yield* startOn(codexIrisInstanceId, threadId);
+
+      const input = handoffTarget.startSession.mock.calls[0]?.[0];
+      assert.deepEqual(input?.resumeCursor, source.resumeCursor);
+      assert.equal(input?.cwd, cwd);
+      assert.deepEqual(replacement.resumeCursor, source.resumeCursor);
+      yield* provider.stopSession({ threadId });
+    }),
+  );
+
+  it.effect("does not start the replacement when the previous instance cannot be stopped", () =>
+    Effect.gen(function* () {
+      const provider = yield* ProviderService.ProviderService;
+      const directory = yield* ProviderSessionDirectory.ProviderSessionDirectory;
+      const threadId = asThreadId("thread-handoff-stop-failed");
+      const cwd = fixtureCwd("project-handoff-stop-failed");
+      const source = yield* startOn(codexInstanceId, threadId, { cwd });
+      handoffSource.stopSession.mockImplementationOnce(() =>
+        Effect.fail(
+          new ProviderAdapterProcessError({
+            provider: "codex",
+            threadId,
+            detail: "Codex App Server did not exit.",
+          }),
+        ),
+      );
+      handoffTarget.startSession.mockClear();
+
+      const exit = yield* Effect.exit(
+        startOn(codexIrisInstanceId, threadId, { cwd, resumeCursor: source.resumeCursor }),
+      );
+
+      assert(Exit.isFailure(exit));
+      const error = Cause.squash(exit.cause);
+      assert(isProviderAdapterProcessError(error));
+      assert.match(error.detail, /did not exit/);
+      assert.equal(handoffTarget.startSession.mock.calls.length, 0);
+      const binding = yield* directory.getBinding(threadId);
+      assert(Option.isSome(binding));
+      assert.equal(binding.value.providerInstanceId, codexInstanceId);
+      assert.deepEqual(binding.value.resumeCursor, source.resumeCursor);
+      assert.equal(yield* handoffSource.adapter.hasSession(threadId), true);
+      yield* provider.stopSession({ threadId });
+    }),
+  );
+
+  it.effect("leaves a resumable binding on the previous instance when the replacement fails", () =>
+    Effect.gen(function* () {
+      const directory = yield* ProviderSessionDirectory.ProviderSessionDirectory;
+      const threadId = asThreadId("thread-handoff-start-failed");
+      const cwd = fixtureCwd("project-handoff-start-failed");
+      const source = yield* startOn(codexInstanceId, threadId, { cwd });
+      handoffSource.stopSession.mockClear();
+      // The fake's start never fails by type; the real adapter's does.
+      handoffTarget.startSession.mockImplementationOnce(
+        () =>
+          Effect.fail(
+            new ProviderAdapterProcessError({
+              provider: "codex",
+              threadId,
+              detail: "Failed to spawn codex-iris.",
+            }),
+          ) as unknown as Effect.Effect<ProviderSession>,
+      );
+
+      const exit = yield* Effect.exit(
+        startOn(codexIrisInstanceId, threadId, { cwd, resumeCursor: source.resumeCursor }),
+      );
+
+      assert(Exit.isFailure(exit));
+      assert.deepEqual(handoffSource.stopSession.mock.calls, [[threadId]]);
+      const binding = yield* directory.getBinding(threadId);
+      assert(Option.isSome(binding));
+      assert.equal(binding.value.providerInstanceId, codexInstanceId);
+      assert.equal(binding.value.status, "stopped");
+      assert.deepEqual(binding.value.resumeCursor, source.resumeCursor);
+      assert.equal(yield* handoffSource.adapter.hasSession(threadId), false);
+    }),
   );
 });
 

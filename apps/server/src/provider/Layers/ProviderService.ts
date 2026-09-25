@@ -1414,6 +1414,54 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
     );
   });
 
+  /**
+   * Hands a thread's native conversation from one instance of a driver to
+   * another. The previous instance's session is stopped before the replacement
+   * starts, and `stopSession` only returns once the adapter has released its
+   * process, so the replacement is the only writer when it resumes. Unlike the
+   * post-start `stopStaleSessionsForThread`, a stop failure propagates: the
+   * replacement would only fail on the same writer conflict, and the caller
+   * needs to know the previous session is still running. The live cursor is
+   * persisted first so a failed replacement start still leaves the thread
+   * resumable on either instance.
+   */
+  const releaseSessionForHandoff = Effect.fn("releaseSessionForHandoff")(function* (input: {
+    readonly threadId: ThreadId;
+    readonly previousInstanceId: ProviderInstanceId;
+  }) {
+    const adapterOption = yield* registry
+      .getByInstance(input.previousInstanceId)
+      .pipe(Effect.option);
+    // The previous instance was removed from settings; its adapter and any
+    // process it owned are already gone.
+    if (Option.isNone(adapterOption)) return;
+    const adapter = adapterOption.value;
+    if (!(yield* adapter.hasSession(input.threadId))) return;
+    const live = (yield* adapter.listSessions()).find(
+      (session) => session.threadId === input.threadId,
+    );
+    if (live !== undefined) {
+      yield* upsertSessionBinding(
+        { ...live, providerInstanceId: input.previousInstanceId },
+        input.threadId,
+      );
+    }
+    yield* adapter.stopSession(input.threadId);
+    yield* clearTurnAnalyticsSession(input.previousInstanceId, input.threadId);
+    yield* directory.upsert({
+      threadId: input.threadId,
+      provider: adapter.provider,
+      providerInstanceId: input.previousInstanceId,
+      status: "stopped",
+      runtimePayload: {
+        activeTurnId: null,
+        continueAfterServerUpdate: null,
+        continueAfterServerUpdatePrepared: null,
+      },
+    });
+    yield* analytics.record("provider.session.stopped", { provider: adapter.provider });
+  });
+
   const startSession: ProviderServiceMethod<"startSession"> = Effect.fn("startSession")(
     function* (threadId, rawInput) {
       const parsed = yield* decodeInputOrValidationError({
@@ -1455,6 +1503,13 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
           );
         }
         const persistedBinding = Option.getOrUndefined(yield* directory.getBinding(threadId));
+        // A thread bound to another instance of the same driver may move here
+        // when both instances share resume state (same continuation key). The
+        // previous instance then hands the native conversation over: its
+        // cursor carries across so the conversation continues, and its session
+        // is released before this one resumes, because Codex allows a single
+        // writer per native thread.
+        let handoffFromInstanceId: ProviderInstanceId | undefined;
         if (
           persistedBinding?.provider === resolvedProvider &&
           persistedBinding.providerInstanceId !== resolvedInstanceId &&
@@ -1474,32 +1529,31 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
               `Thread '${threadId}' cannot switch from instance '${previousInstanceId}' to '${resolvedInstanceId}' because their provider resume state is incompatible.`,
             );
           }
+          handoffFromInstanceId = previousInstanceId;
         }
+        const reusePersistedState =
+          persistedBinding !== undefined &&
+          (persistedBinding.providerInstanceId === resolvedInstanceId ||
+            handoffFromInstanceId !== undefined);
         const effectiveResumeCursor =
-          input.resumeCursor ??
-          (persistedBinding?.providerInstanceId === resolvedInstanceId
-            ? persistedBinding.resumeCursor
-            : undefined);
+          input.resumeCursor ?? (reusePersistedState ? persistedBinding.resumeCursor : undefined);
         const effectiveCwd =
           input.cwd ??
-          (persistedBinding?.providerInstanceId === resolvedInstanceId
-            ? readPersistedCwd(persistedBinding.runtimePayload)
-            : undefined);
+          (reusePersistedState ? readPersistedCwd(persistedBinding.runtimePayload) : undefined);
         yield* Effect.annotateCurrentSpan({
           "provider.kind": resolvedProvider,
           "provider.resume_cursor.source":
             input.resumeCursor !== undefined
               ? "request"
-              : effectiveResumeCursor !== undefined &&
-                  persistedBinding?.providerInstanceId === resolvedInstanceId
+              : effectiveResumeCursor !== undefined && reusePersistedState
                 ? "persisted"
                 : "none",
           "provider.resume_cursor.present": effectiveResumeCursor !== undefined,
+          "provider.handoff_from_instance_id": handoffFromInstanceId ?? "",
           "provider.cwd.source":
             input.cwd !== undefined
               ? "request"
-              : effectiveCwd !== undefined &&
-                  persistedBinding?.providerInstanceId === resolvedInstanceId
+              : effectiveCwd !== undefined && reusePersistedState
                 ? "persisted"
                 : "none",
           "provider.cwd.effective": effectiveCwd ?? "",
@@ -1519,6 +1573,12 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
           }
         }
         const adapter = yield* registry.getByInstance(resolvedInstanceId);
+        if (handoffFromInstanceId !== undefined) {
+          yield* releaseSessionForHandoff({
+            threadId,
+            previousInstanceId: handoffFromInstanceId,
+          });
+        }
         yield* clearTurnAnalyticsSession(resolvedInstanceId, threadId);
         yield* prepareMcpSession(threadId, resolvedInstanceId, input.runtimeMode);
         const session = yield* adapter
