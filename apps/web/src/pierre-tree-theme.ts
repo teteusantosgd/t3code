@@ -11,6 +11,12 @@ export const PIERRE_TREE_UNSAFE_CSS = `
     --trees-font-size-override: 12px;
   }
   button[data-type='item'] { border-radius: 5px; }
+  /* Pierre shows a truncation marker when its measure cell is taller than 1lh.
+     At fractional zoom that cell rounds to e.g. 24.02px for a 24px line, so
+     every split name paints a stray "…". Real overflow wraps to 2+ lines. */
+  @container measure (height < 1.5lh) {
+    [data-truncate-marker] { opacity: 0; }
+  }
 `;
 
 /** Host styles that keep a Pierre tree on the active color scheme and foreground. */
