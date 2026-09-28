@@ -13,6 +13,7 @@ export const T3_PROJECT_FILE_SCHEMA_URL = "https://t3.codes/schema/t3.json";
 
 const T3_PROJECT_FILE_PATH_MAX_LENGTH = 512;
 const T3_PROJECT_FILE_MAX_SCRIPTS = 50;
+const T3_PROJECT_FILE_MAX_REPOSITORY_PATHS = 100;
 
 // Annotations go on the encoded (string) side so they survive into the
 // published JSON Schema; decoding still trims and re-validates non-emptiness.
@@ -66,6 +67,34 @@ export const T3ProjectFileScript = Schema.Struct({
 });
 export type T3ProjectFileScript = typeof T3ProjectFileScript.Type;
 
+/**
+ * Declares Git repositories under this project folder for Diff/status review.
+ * This does not sandbox the agent; it only scopes the Diff panel's All repos view.
+ */
+export const T3ProjectFileRepositories = Schema.Struct({
+  paths: Schema.optionalKey(
+    Schema.Array(
+      trimmedNonEmpty(
+        {
+          description:
+            'Workspace-relative repository path, or a trailing /* pattern for immediate child directories (e.g. "apps/*").',
+        },
+        T3_PROJECT_FILE_PATH_MAX_LENGTH,
+      ),
+    ).check(Schema.isMaxLength(T3_PROJECT_FILE_MAX_REPOSITORY_PATHS)),
+  ),
+  includeSubmodules: Schema.optionalKey(
+    Schema.Boolean.annotate({
+      description:
+        "When true, also include submodule paths declared in .gitmodules under discovered repositories.",
+    }),
+  ),
+}).annotate({
+  description:
+    "Git repositories inside this project folder that the Diff panel can show together or filter. Does not restrict agent file access.",
+});
+export type T3ProjectFileRepositories = typeof T3ProjectFileRepositories.Type;
+
 export const T3ProjectFile = Schema.Struct({
   $schema: Schema.optionalKey(
     Schema.String.annotate({
@@ -93,6 +122,7 @@ export const T3ProjectFile = Schema.Struct({
         'How new worktrees populate git submodules: "recursive" (the default) initializes nested submodules too, "top-level" initializes only those declared by this repository, and "none" leaves every submodule empty for a setup script to handle. A project or environment setting in T3 Code overrides this.',
     }),
   ),
+  repositories: Schema.optionalKey(T3ProjectFileRepositories),
   scripts: Schema.optionalKey(
     Schema.Array(T3ProjectFileScript)
       .annotate({

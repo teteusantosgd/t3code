@@ -30,6 +30,8 @@ export const ProjectionProject = Schema.Struct({
   autoPull: Schema.Boolean,
   faviconPath: Schema.optional(Schema.NullOr(Schema.String)),
   projectIcon: Schema.optional(Schema.NullOr(ProjectIconOverride)),
+  workspaceFile: Schema.optional(Schema.NullOr(Schema.String)),
+  repoRoots: Schema.optional(Schema.Array(Schema.String)),
   scripts: Schema.Array(ProjectScript),
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
@@ -59,6 +61,12 @@ export interface ProjectionProjectRepositoryShape {
   readonly getById: (
     input: GetProjectionProjectInput,
   ) => Effect.Effect<Option.Option<ProjectionProject>, ProjectionRepositoryError>;
+
+  /** Active (non-deleted) projects for workspace authorization checks. */
+  readonly listActive: () => Effect.Effect<
+    ReadonlyArray<ProjectionProject>,
+    ProjectionRepositoryError
+  >;
 }
 
 /**

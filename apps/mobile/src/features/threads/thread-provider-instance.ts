@@ -4,7 +4,6 @@ import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/shell
 import {
   normalizeProviderAccentColor,
   resolveProviderInstanceDisplayName,
-  shouldShowInstanceBadge,
 } from "@t3tools/client-runtime/state/provider-instance-display";
 import type { EnvironmentId, ProviderDriverKind, ServerConfig } from "@t3tools/contracts";
 
@@ -29,17 +28,12 @@ export function resolveThreadProviderInstance(
   const instanceId = thread.session?.providerInstanceId ?? thread.modelSelection.instanceId;
   const snapshot = providers.find((provider) => provider.instanceId === instanceId);
   if (!snapshot) return null;
-  const entry = {
+  return {
     driverKind: snapshot.driver,
     displayName: resolveProviderInstanceDisplayName(snapshot),
     accentColor: normalizeProviderAccentColor(snapshot.accentColor),
-  };
-  return {
-    ...entry,
-    showBadge: shouldShowInstanceBadge(
-      entry,
-      providers.map((provider) => ({ driverKind: provider.driver })),
-    ),
+    // Mobile has no client-settings toggle yet; match the web default (off).
+    showBadge: false,
   };
 }
 

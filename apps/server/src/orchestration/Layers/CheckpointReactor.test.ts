@@ -65,8 +65,15 @@ import {
 import { checkpointRefForThreadTurn } from "../../checkpointing/Utils.ts";
 import { ProviderValidationError } from "../../provider/Errors.ts";
 import { ServerConfig } from "../../config.ts";
+import * as WorkspaceAuthorizedRoots from "../../workspace/WorkspaceAuthorizedRoots.ts";
 import * as WorkspaceEntries from "../../workspace/WorkspaceEntries.ts";
 import * as WorkspacePaths from "../../workspace/WorkspacePaths.ts";
+
+const workspaceAuthorizedRootsTestLayer = Layer.mock(
+  WorkspaceAuthorizedRoots.WorkspaceAuthorizedRoots,
+)({
+  ensureFilesCwdAuthorized: () => Effect.void,
+});
 import { PullRequestService } from "../../pullRequest/PullRequestService.ts";
 
 const asProjectId = (value: string): ProjectId => ProjectId.make(value);
@@ -394,7 +401,11 @@ describe("CheckpointReactor", () => {
         (options?.workspaceRefresh
           ? Layer.mock(WorkspaceEntries.WorkspaceEntries)({ refresh: options.workspaceRefresh })
           : WorkspaceEntries.layer
-        ).pipe(Layer.provide(WorkspacePaths.layer), Layer.provideMerge(VcsDriverRegistry.layer)),
+        ).pipe(
+          Layer.provide(workspaceAuthorizedRootsTestLayer),
+          Layer.provide(WorkspacePaths.layer),
+          Layer.provideMerge(VcsDriverRegistry.layer),
+        ),
       ),
       Layer.provideMerge(WorkspacePaths.layer),
       Layer.provideMerge(VcsProcess.layer),

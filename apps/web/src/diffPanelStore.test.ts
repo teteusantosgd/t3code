@@ -2,7 +2,12 @@ import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 import { EnvironmentId, ThreadId, TurnId } from "@t3tools/contracts";
 import { beforeEach, describe, expect, it } from "vite-plus/test";
 
-import { selectThreadDiffPanelSelection, useDiffPanelStore } from "./diffPanelStore";
+import {
+  gitScopeLabel,
+  selectThreadDiffPanelSelection,
+  sourceKindForGitScope,
+  useDiffPanelStore,
+} from "./diffPanelStore";
 
 const THREAD_REF = scopeThreadRef(EnvironmentId.make("environment-1"), ThreadId.make("thread-1"));
 
@@ -14,16 +19,26 @@ describe("diffPanelStore", () => {
     }),
   );
 
-  it("defaults each thread to working tree changes without requiring git status", () => {
+  it("defaults each thread to uncommitted changes without requiring git status", () => {
     expect(
       selectThreadDiffPanelSelection(useDiffPanelStore.getState().byThreadKey, THREAD_REF),
-    ).toEqual({ kind: "unstaged" });
+    ).toEqual({ kind: "uncommitted" });
   });
 
-  it("defaults to working tree changes before a thread is selected", () => {
+  it("defaults to uncommitted changes before a thread is selected", () => {
     expect(selectThreadDiffPanelSelection(useDiffPanelStore.getState().byThreadKey, null)).toEqual({
-      kind: "unstaged",
+      kind: "uncommitted",
     });
+  });
+
+  it("maps git scopes to review source kinds", () => {
+    expect(sourceKindForGitScope("uncommitted")).toBe("working-tree");
+    expect(sourceKindForGitScope("staged")).toBe("staged");
+    expect(sourceKindForGitScope("unstaged")).toBe("unstaged");
+    expect(gitScopeLabel("uncommitted")).toBe("Uncommitted");
+    expect(gitScopeLabel("staged")).toBe("Staged");
+    expect(gitScopeLabel("unstaged")).toBe("Unstaged");
+    expect(gitScopeLabel("branch")).toBe("Branch changes");
   });
 
   it("preserves an explicit branch selection", () => {
@@ -37,11 +52,11 @@ describe("diffPanelStore", () => {
   it("clears incompatible selection fields when changing scopes", () => {
     const store = useDiffPanelStore.getState();
     store.selectTurn(THREAD_REF, TurnId.make("turn-1"), "src/app.ts");
-    store.selectGitScope(THREAD_REF, "unstaged");
+    store.selectGitScope(THREAD_REF, "uncommitted");
 
     expect(
       selectThreadDiffPanelSelection(useDiffPanelStore.getState().byThreadKey, THREAD_REF),
-    ).toEqual({ kind: "unstaged" });
+    ).toEqual({ kind: "uncommitted" });
 
     useDiffPanelStore.getState().selectBranchBaseRef(THREAD_REF, " origin/main ");
     expect(
@@ -59,10 +74,10 @@ describe("diffPanelStore", () => {
     store.selectTurn(THREAD_REF, TurnId.make("turn-1"), "src/app.ts");
     store.selectBranchBaseRef(otherThreadRef, "origin/main");
 
-    store.selectGitScope(THREAD_REF, "unstaged");
+    store.selectGitScope(THREAD_REF, "staged");
 
     const { byThreadKey } = useDiffPanelStore.getState();
-    expect(selectThreadDiffPanelSelection(byThreadKey, THREAD_REF)).toEqual({ kind: "unstaged" });
+    expect(selectThreadDiffPanelSelection(byThreadKey, THREAD_REF)).toEqual({ kind: "staged" });
     expect(selectThreadDiffPanelSelection(byThreadKey, otherThreadRef)).toEqual({
       kind: "branch",
       baseRef: "origin/main",

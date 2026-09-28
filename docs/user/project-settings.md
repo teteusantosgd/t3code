@@ -46,9 +46,16 @@ generation. The same rows edit environment defaults or project overrides dependi
 project crumb.
 
 The Project category, shown while a project is selected, holds the project's name, icon, actions,
-checkouts and removal. Actions belong to a project: editing them creates the project's own list
-on each selected environment, and reset returns to the environment's shared list. A project's
-`t3.json` actions can be imported there.
+checkouts, Diff repository paths, VS Code workspace link, and removal. Actions belong to a project:
+editing them creates the project's own list on each selected environment, and reset returns to the
+environment's shared list. A project's `t3.json` actions can be imported there.
+
+**Link VS Code workspace** attaches a `.code-workspace` so Diff and Files use that file's Git
+folders (including sibling checkouts) without recreating the project. Linked folders show in
+settings so you can add or remove roots there; **Refresh from file** reloads from the workspace
+file, and unlink clears it. **Settings → Source Control → Diff repositories** still edits
+`repositories.paths` in that checkout's `t3.json` for Diff All repos when no workspace file is
+linked.
 
 Settings a repository can also declare in `t3.json`, such as the workspace for new threads,
 resolve in one order: a project override, then the environment setting, then `t3.json`, then the

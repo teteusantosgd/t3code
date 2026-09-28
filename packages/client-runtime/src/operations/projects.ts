@@ -3,7 +3,9 @@ import type {
   CommandId,
   EnvironmentId,
   OrchestrationCommand,
+  ProjectCodeWorkspaceFolder,
   ProjectId,
+  ProjectResolveCodeWorkspaceResult,
   SourceControlDiscoveryResult,
   SourceControlProviderKind,
   SourceControlRepositoryInfo,
@@ -318,6 +320,53 @@ export function buildProjectCreateCommand(input: {
     title: inferProjectTitleFromPath(input.workspaceRoot),
     workspaceRoot: input.workspaceRoot,
     createWorkspaceRootIfMissing: true,
+    defaultModelSelection: null,
+    createdAt: input.createdAt,
+  };
+}
+
+export const CODE_WORKSPACE_FILE_EXTENSION = ".code-workspace";
+
+export function isCodeWorkspaceFilePath(path: string): boolean {
+  return path.trim().toLowerCase().endsWith(CODE_WORKSPACE_FILE_EXTENSION);
+}
+
+export function inferProjectTitleFromCodeWorkspaceFile(workspaceFilePath: string): string {
+  const baseName = inferProjectTitleFromPath(workspaceFilePath);
+  const lower = baseName.toLowerCase();
+  if (lower.endsWith(CODE_WORKSPACE_FILE_EXTENSION)) {
+    const stripped = baseName.slice(0, baseName.length - CODE_WORKSPACE_FILE_EXTENSION.length);
+    return stripped.length > 0 ? stripped : baseName;
+  }
+  return baseName;
+}
+
+export function describeCodeWorkspaceFolder(
+  folder: Pick<ProjectCodeWorkspaceFolder, "exists" | "isGit" | "absolutePath">,
+): string {
+  if (!folder.exists) {
+    return "Missing on disk";
+  }
+  if (!folder.isGit) {
+    return "Not a Git repository";
+  }
+  return folder.absolutePath;
+}
+
+export function buildProjectCreateCommandWithCodeWorkspace(input: {
+  readonly commandId: CommandId;
+  readonly projectId: ProjectId;
+  readonly preview: Pick<ProjectResolveCodeWorkspaceResult, "anchorDir" | "workspaceFilePath">;
+  readonly createdAt: string;
+}): Extract<OrchestrationCommand, { type: "project.create" }> {
+  return {
+    type: "project.create",
+    commandId: input.commandId,
+    projectId: input.projectId,
+    title: inferProjectTitleFromCodeWorkspaceFile(input.preview.workspaceFilePath),
+    workspaceRoot: input.preview.anchorDir,
+    workspaceFile: input.preview.workspaceFilePath,
+    createWorkspaceRootIfMissing: false,
     defaultModelSelection: null,
     createdAt: input.createdAt,
   };

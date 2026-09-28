@@ -260,6 +260,15 @@ export const SETTINGS_SEARCH_ITEMS = [
     searchTerms: ["long lines code blocks tables diffs file previews"],
   },
   {
+    id: "provider-instance-badges",
+    title: "Provider account badges",
+    to: "/settings/appearance",
+    searchTerms: [
+      "provider instance account badge initials accent icon sidebar codex claude hide show",
+    ],
+    targetId: "appearance-interface",
+  },
+  {
     id: "project-grouping",
     title: "Project grouping",
     to: "/settings/general",
@@ -711,6 +720,14 @@ export const SETTINGS_SEARCH_ITEMS = [
     ],
     environmentOnly: true,
     scope: "project-defaults",
+  },
+  {
+    id: "project-repositories",
+    title: "Diff repositories",
+    to: "/settings/source-control",
+    searchTerms: [
+      "repositories paths all repos multi-repo monorepo t3.json includeSubmodules git diff",
+    ],
   },
   {
     id: "project-actions",

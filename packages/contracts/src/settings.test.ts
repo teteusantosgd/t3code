@@ -284,6 +284,25 @@ describe("ClientSettings default diff file state", () => {
   });
 });
 
+describe("ClientSettings provider instance badges", () => {
+  it("hides badges when existing settings omit the preference", () => {
+    expect(decodeClientSettings({}).showProviderInstanceBadges).toBe(false);
+  });
+
+  it.each([true, false])(
+    "preserves a saved provider-instance badge preference of %s",
+    (showProviderInstanceBadges) => {
+      const settings = decodeClientSettings({ showProviderInstanceBadges });
+      expect(encodeClientSettings(settings).showProviderInstanceBadges).toBe(
+        showProviderInstanceBadges,
+      );
+      expect(
+        decodeClientSettingsPatch({ showProviderInstanceBadges }).showProviderInstanceBadges,
+      ).toBe(showProviderInstanceBadges);
+    },
+  );
+});
+
 describe("ClientSettings diff colors", () => {
   it("keeps red and green for existing settings without a saved palette", () => {
     expect(decodeClientSettings({}).diffColorScheme).toBe("red-green");

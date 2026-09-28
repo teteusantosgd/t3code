@@ -11,20 +11,38 @@ import * as Path from "effect/Path";
 import * as ServerConfig from "../config.ts";
 import * as VcsDriverRegistry from "../vcs/VcsDriverRegistry.ts";
 import * as VcsProcess from "../vcs/VcsProcess.ts";
+import * as WorkspaceAuthorizedRoots from "./WorkspaceAuthorizedRoots.ts";
 import * as WorkspaceEntries from "./WorkspaceEntries.ts";
 import * as WorkspaceFileSystem from "./WorkspaceFileSystem.ts";
 import * as WorkspacePaths from "./WorkspacePaths.ts";
+
+const workspaceAuthorizedRootsTestLayer = Layer.mock(
+  WorkspaceAuthorizedRoots.WorkspaceAuthorizedRoots,
+)({
+  ensureFilesCwdAuthorized: () => Effect.void,
+});
 import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
 import { symlinksSupported } from "@t3tools/shared/testing/symlinks";
 
 const ProjectLayer = WorkspaceFileSystem.layer.pipe(
+  Layer.provide(workspaceAuthorizedRootsTestLayer),
   Layer.provide(WorkspacePaths.layer),
-  Layer.provide(WorkspaceEntries.layer.pipe(Layer.provide(WorkspacePaths.layer))),
+  Layer.provide(
+    WorkspaceEntries.layer.pipe(
+      Layer.provide(workspaceAuthorizedRootsTestLayer),
+      Layer.provide(WorkspacePaths.layer),
+    ),
+  ),
 );
 
 const TestLayer = Layer.empty.pipe(
   Layer.provideMerge(ProjectLayer),
-  Layer.provideMerge(WorkspaceEntries.layer.pipe(Layer.provide(WorkspacePaths.layer))),
+  Layer.provideMerge(
+    WorkspaceEntries.layer.pipe(
+      Layer.provide(workspaceAuthorizedRootsTestLayer),
+      Layer.provide(WorkspacePaths.layer),
+    ),
+  ),
   Layer.provideMerge(WorkspacePaths.layer),
   Layer.provideMerge(VcsDriverRegistry.layer.pipe(Layer.provide(VcsProcess.layer))),
   Layer.provide(

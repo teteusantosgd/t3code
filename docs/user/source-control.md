@@ -73,6 +73,42 @@ az extension add --name azure-devops
 az login
 ```
 
+## Review local changes
+
+In the Diff panel, choose **Uncommitted** for everything not committed yet, **Staged** for the
+index only, **Unstaged** for worktree changes (including untracked files) that are not staged, or
+**Branch changes** to compare against a base branch.
+
+## Review multiple repositories in one project
+
+Open a VS Code `.code-workspace` with **Add Project → VS Code workspace**, or link one on an
+existing project under **Settings → Project → VS Code workspace**. T3 reads the file's `folders`
+list, keeps the workspace file's directory as the project anchor, and uses each existing Git
+folder as a Diff and Files root. Refresh that settings row after you edit the workspace file.
+Agents still start in the first Git folder (or the anchor if none).
+
+For a single-folder project without a workspace file, list Git repositories in `t3.json` so Diff
+can show **All repos** or filter to one repository. Edit the same list in
+**Settings → Source Control → Diff repositories** (choose a project at the top first). When a
+workspace file supplies repo roots, those take priority over `t3.json`.
+
+Paths in `t3.json` are relative to the project checkout. Use `"."` for the current repo and
+`../Sibling` for neighboring checkouts, or point the project at a shared parent and list children
+by name:
+
+```json
+{
+  "repositories": {
+    "paths": [".", "../Radius", "../Services", "../GeneralService"]
+  }
+}
+```
+
+Use a trailing `/*` to include every immediate child of a directory (for example `"apps/*"`). The
+`t3.json` list only affects Diff status and previews. Commits, pushes, pull requests, worktrees,
+and checkpoints still use the project root. Prefer a local thread for this layout; worktree
+threads keep a single checkout.
+
 ## Clone or publish a project
 
 Use **Add Project** in the command palette (`Cmd/Ctrl+K`) to clone a repository. Choose a hosting

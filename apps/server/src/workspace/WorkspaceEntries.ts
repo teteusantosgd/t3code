@@ -25,6 +25,7 @@ import { normalizeSearchQuery } from "@t3tools/shared/searchRanking";
 
 import { expandHomePathWith } from "../pathExpansion.ts";
 import * as VcsProcess from "../vcs/VcsProcess.ts";
+import * as WorkspaceAuthorizedRoots from "./WorkspaceAuthorizedRoots.ts";
 import * as WorkspacePaths from "./WorkspacePaths.ts";
 import * as WorkspaceSearchIndex from "./WorkspaceSearchIndex.ts";
 
@@ -77,6 +78,8 @@ export type WorkspaceEntriesBrowseError = typeof WorkspaceEntriesBrowseError.Typ
 
 export const WorkspaceEntriesError = Schema.Union([
   WorkspaceEntriesReadDirectoryError,
+  WorkspaceAuthorizedRoots.WorkspaceAuthorizedRootsLoadError,
+  WorkspaceAuthorizedRoots.WorkspaceCwdNotAuthorizedError,
   WorkspacePaths.WorkspaceRootNotExistsError,
   WorkspacePaths.WorkspaceRootCreateFailedError,
   WorkspacePaths.WorkspaceRootStatFailedError,
@@ -135,8 +138,15 @@ const resolveBrowseTarget = Effect.fn("WorkspaceEntries.resolveBrowseTarget")(fu
 export const make = Effect.gen(function* () {
   const path = yield* Path.Path;
   const workspacePaths = yield* WorkspacePaths.WorkspacePaths;
+  const workspaceAuthorizedRoots = yield* WorkspaceAuthorizedRoots.WorkspaceAuthorizedRoots;
   const workspaceSearchIndexes = yield* WorkspaceSearchIndex.WorkspaceSearchIndexMap;
   const vcsProcess = yield* VcsProcess.VcsProcess;
+
+  const ensureFilesCwdAuthorized = Effect.fn("WorkspaceEntries.ensureFilesCwdAuthorized")(
+    function* (cwd: string) {
+      yield* workspaceAuthorizedRoots.ensureFilesCwdAuthorized(cwd);
+    },
+  );
 
   const normalizeWorkspaceRoot = Effect.fn("WorkspaceEntries.normalizeWorkspaceRoot")(function* (
     cwd: string,
@@ -211,16 +221,35 @@ export const make = Effect.gen(function* () {
 
       const showHidden = endsWithSeparator || prefix.startsWith(".");
       const lowerPrefix = prefix.toLowerCase();
-      const entries: Array<{ readonly name: string; readonly fullPath: string }> = [];
+      const includeFileExtensions = (input.includeFileExtensions ?? []).map((extension) =>
+        extension.startsWith(".") ? extension.toLowerCase() : `.${extension.toLowerCase()}`,
+      );
+      const entries: Array<{
+        readonly name: string;
+        readonly fullPath: string;
+        readonly kind: "directory" | "file";
+      }> = [];
       for (const dirent of dirents) {
-        if (
-          dirent.isDirectory() &&
+        const nameMatches =
           dirent.name.toLowerCase().startsWith(lowerPrefix) &&
-          (showHidden || !dirent.name.startsWith("."))
+          (showHidden || !dirent.name.startsWith("."));
+        if (!nameMatches) continue;
+        if (dirent.isDirectory()) {
+          entries.push({
+            name: dirent.name,
+            fullPath: path.join(parentPath, dirent.name),
+            kind: "directory",
+          });
+          continue;
+        }
+        if (
+          dirent.isFile() &&
+          includeFileExtensions.some((extension) => dirent.name.toLowerCase().endsWith(extension))
         ) {
           entries.push({
             name: dirent.name,
             fullPath: path.join(parentPath, dirent.name),
+            kind: "file",
           });
         }
       }
@@ -234,6 +263,7 @@ export const make = Effect.gen(function* () {
 
   const search: WorkspaceEntries["Service"]["search"] = Effect.fn("WorkspaceEntries.search")(
     function* (input) {
+      yield* ensureFilesCwdAuthorized(input.cwd);
       const normalizedCwd = yield* normalizeWorkspaceRoot(input.cwd);
       const normalizedQuery = normalizeSearchQuery(input.query, {
         trimLeadingPattern: /^[@./]+/,
@@ -254,6 +284,7 @@ export const make = Effect.gen(function* () {
   const searchContents: WorkspaceEntries["Service"]["searchContents"] = Effect.fn(
     "WorkspaceEntries.searchContents",
   )(function* (input) {
+    yield* ensureFilesCwdAuthorized(input.cwd);
     const normalizedCwd = yield* normalizeWorkspaceRoot(input.cwd);
     return yield* Effect.gen(function* () {
       const searchIndex = yield* WorkspaceSearchIndex.WorkspaceSearchIndex;
@@ -269,6 +300,7 @@ export const make = Effect.gen(function* () {
 
   const list: WorkspaceEntries["Service"]["list"] = Effect.fn("WorkspaceEntries.list")(
     function* (input) {
+      yield* ensureFilesCwdAuthorized(input.cwd);
       const normalizedCwd = yield* normalizeWorkspaceRoot(input.cwd);
       if (input.directoryPath !== undefined) {
         const directoryPath = input.directoryPath;

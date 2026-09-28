@@ -66,4 +66,21 @@ describe("T3ProjectFile", () => {
     expect(decode({ worktreeSubmodules: "top-level" }).worktreeSubmodules).toBe("top-level");
     expect(() => decode({ worktreeSubmodules: "shallow" })).toThrow();
   });
+
+  it("decodes repositories paths for multi-repo Diff review", () => {
+    const decoded = decode({
+      repositories: {
+        paths: ["HSpotWeb", "apps/*", "Services"],
+        includeSubmodules: true,
+      },
+    });
+    expect(decoded.repositories).toEqual({
+      paths: ["HSpotWeb", "apps/*", "Services"],
+      includeSubmodules: true,
+    });
+  });
+
+  it("rejects an empty repository path", () => {
+    expect(() => decode({ repositories: { paths: [" "] } })).toThrow();
+  });
 });

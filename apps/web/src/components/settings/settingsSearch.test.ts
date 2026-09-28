@@ -497,7 +497,7 @@ describe("auto-settlement search availability", () => {
 });
 
 describe("settings sidebar scope", () => {
-  it("shows Overview only for project and checkout targets", () => {
+  it("treats project and checkout search params as a project overview target", () => {
     expect(isSettingsOverviewVisible({})).toBe(false);
     expect(isSettingsOverviewVisible({ machine: "remote" })).toBe(false);
     expect(isSettingsOverviewVisible({ project: "project" })).toBe(true);

@@ -65,6 +65,7 @@ import {
   resolveProactiveTurnDiffAction,
   resolveThreadMetadataUpdateForNextTurn,
   resolveSendEnvMode,
+  isDiffSurfaceAvailable,
   threadShellHasStarted,
   resolveDraftHeroState,
   isPaintOnlyThreadTimeline,
@@ -1628,6 +1629,45 @@ describe("resolveSendEnvMode", () => {
   it("keeps worktree mode only for git repositories", () => {
     expect(resolveSendEnvMode({ requestedEnvMode: "worktree", isGitRepo: true })).toBe("worktree");
     expect(resolveSendEnvMode({ requestedEnvMode: "worktree", isGitRepo: false })).toBe("local");
+  });
+});
+
+describe("isDiffSurfaceAvailable", () => {
+  it("allows Diff when the project root is a git repo", () => {
+    expect(
+      isDiffSurfaceAvailable({
+        isServerThread: true,
+        isGitRepo: true,
+        hasConfiguredRepositories: false,
+      }),
+    ).toBe(true);
+  });
+
+  it("allows Diff for configured nested repositories even when the root is not git", () => {
+    expect(
+      isDiffSurfaceAvailable({
+        isServerThread: true,
+        isGitRepo: false,
+        hasConfiguredRepositories: true,
+      }),
+    ).toBe(true);
+  });
+
+  it("keeps Diff unavailable for draft threads and empty non-git projects", () => {
+    expect(
+      isDiffSurfaceAvailable({
+        isServerThread: false,
+        isGitRepo: true,
+        hasConfiguredRepositories: true,
+      }),
+    ).toBe(false);
+    expect(
+      isDiffSurfaceAvailable({
+        isServerThread: true,
+        isGitRepo: false,
+        hasConfiguredRepositories: false,
+      }),
+    ).toBe(false);
   });
 });
 

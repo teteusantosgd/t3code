@@ -553,6 +553,12 @@ export const OrchestrationProject = Schema.Struct({
   // Optional on the wire so cached snapshots from older servers still decode.
   faviconPath: Schema.optional(Schema.NullOr(ProjectFaviconPath)),
   projectIcon: Schema.optional(Schema.NullOr(ProjectIconOverride)),
+  // VS Code `.code-workspace` path when this project was opened/linked from one.
+  // Optional on the wire so cached snapshots from older servers still decode.
+  workspaceFile: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
+  // Absolute Git folder roots from that workspace file (or empty/absent for
+  // single-root projects). Diff and Files prefer these over t3.json paths.
+  repoRoots: Schema.optional(Schema.Array(TrimmedNonEmptyString)),
   scripts: Schema.Array(ProjectScript),
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
@@ -875,6 +881,8 @@ export const OrchestrationProjectShell = Schema.Struct({
   // Optional on the wire so cached snapshots from older servers still decode.
   faviconPath: Schema.optional(Schema.NullOr(ProjectFaviconPath)),
   projectIcon: Schema.optional(Schema.NullOr(ProjectIconOverride)),
+  workspaceFile: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
+  repoRoots: Schema.optional(Schema.Array(TrimmedNonEmptyString)),
   scripts: Schema.Array(ProjectScript),
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
@@ -1088,6 +1096,10 @@ export const ProjectCreateCommand = Schema.Struct({
   title: TrimmedNonEmptyString,
   workspaceRoot: TrimmedNonEmptyString,
   createWorkspaceRootIfMissing: Schema.optional(Schema.Boolean),
+  // When set, the server reads this `.code-workspace` and persists its git roots.
+  workspaceFile: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
+  // Filled by the server when `workspaceFile` is set; clients may omit it.
+  repoRoots: Schema.optional(Schema.Array(TrimmedNonEmptyString)),
   // Retained for older clients that sent an automatic create-time seed. The
   // server ignores it; explicit project defaults use project.meta.update.
   defaultModelSelection: Schema.optional(Schema.NullOr(ModelSelection)),
@@ -1100,6 +1112,10 @@ const ProjectMetaUpdateCommand = Schema.Struct({
   projectId: ProjectId,
   title: Schema.optional(TrimmedNonEmptyString),
   workspaceRoot: Schema.optional(TrimmedNonEmptyString),
+  // Absent = leave unchanged; null = unlink the workspace file and clear roots.
+  workspaceFile: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
+  // When linking/resyncing, clients may omit this; the server fills from the file.
+  repoRoots: Schema.optional(Schema.Array(TrimmedNonEmptyString)),
   defaultModelSelection: Schema.optional(Schema.NullOr(ModelSelection)),
   // Absent = leave unchanged; null = clear the override.
   defaultThreadEnvMode: Schema.optional(Schema.NullOr(ThreadEnvMode)),
@@ -1737,6 +1753,8 @@ export const ProjectCreatedPayload = Schema.Struct({
   // Optional so persisted events from older servers still decode.
   faviconPath: Schema.optional(Schema.NullOr(ProjectFaviconPath)),
   projectIcon: Schema.optional(Schema.NullOr(ProjectIconOverride)),
+  workspaceFile: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
+  repoRoots: Schema.optional(Schema.Array(TrimmedNonEmptyString)),
   scripts: Schema.Array(ProjectScript),
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
@@ -1752,6 +1770,8 @@ export const ProjectMetaUpdatedPayload = Schema.Struct({
   autoPull: Schema.optional(Schema.Boolean),
   faviconPath: Schema.optional(Schema.NullOr(ProjectFaviconPath)),
   projectIcon: Schema.optional(Schema.NullOr(ProjectIconOverride)),
+  workspaceFile: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
+  repoRoots: Schema.optional(Schema.Array(TrimmedNonEmptyString)),
   scripts: Schema.optional(Schema.Array(ProjectScript)),
   updatedAt: IsoDateTime,
 });

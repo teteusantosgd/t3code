@@ -1,21 +1,25 @@
 import { scopedThreadKey } from "@t3tools/client-runtime/environment";
-import type { ScopedThreadRef, TurnId } from "@t3tools/contracts";
+import type { ReviewDiffPreviewSourceKind, ScopedThreadRef, TurnId } from "@t3tools/contracts";
 import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
 
 import { resolveStorage } from "./lib/storage";
 
+export type DiffPanelGitScope = "uncommitted" | "staged" | "unstaged" | "branch";
+
 export type DiffPanelSelection =
   | { kind: "branch"; baseRef: string | null }
+  | { kind: "uncommitted" }
+  | { kind: "staged" }
   | { kind: "unstaged" }
   | { kind: "turn"; turnId: TurnId; filePath: string | null; revealRequestId: number };
 
-const DEFAULT_SELECTION: DiffPanelSelection = { kind: "unstaged" };
+const DEFAULT_SELECTION: DiffPanelSelection = { kind: "uncommitted" };
 
 interface DiffPanelStoreState {
   byThreadKey: Record<string, DiffPanelSelection>;
   branchBaseRefByThreadKey: Record<string, string | null>;
-  selectGitScope: (ref: ScopedThreadRef, scope: "branch" | "unstaged") => void;
+  selectGitScope: (ref: ScopedThreadRef, scope: DiffPanelGitScope) => void;
   selectBranchBaseRef: (ref: ScopedThreadRef, baseRef: string | null) => void;
   selectTurn: (ref: ScopedThreadRef, turnId: TurnId, filePath?: string) => void;
   reconcileTurnSelection: (ref: ScopedThreadRef, availableTurnIds: ReadonlyArray<TurnId>) => void;
@@ -25,6 +29,34 @@ interface DiffPanelStoreState {
 function normalizeBaseRef(baseRef: string | null): string | null {
   const normalized = baseRef?.trim();
   return normalized ? normalized : null;
+}
+
+function selectionForGitScope(
+  scope: DiffPanelGitScope,
+  previousBaseRef: string | null,
+): DiffPanelSelection {
+  if (scope === "branch") return { kind: "branch", baseRef: previousBaseRef };
+  return { kind: scope };
+}
+
+export function sourceKindForGitScope(
+  scope: Exclude<DiffPanelGitScope, "branch">,
+): ReviewDiffPreviewSourceKind {
+  if (scope === "uncommitted") return "working-tree";
+  return scope;
+}
+
+export function gitScopeLabel(scope: DiffPanelGitScope): string {
+  switch (scope) {
+    case "uncommitted":
+      return "Uncommitted";
+    case "staged":
+      return "Staged";
+    case "unstaged":
+      return "Unstaged";
+    case "branch":
+      return "Branch changes";
+  }
 }
 
 export const useDiffPanelStore = create<DiffPanelStoreState>()(
@@ -43,10 +75,7 @@ export const useDiffPanelStore = create<DiffPanelStoreState>()(
           return {
             byThreadKey: {
               ...state.byThreadKey,
-              [threadKey]:
-                scope === "branch"
-                  ? { kind: "branch", baseRef: previousBaseRef }
-                  : { kind: "unstaged" },
+              [threadKey]: selectionForGitScope(scope, previousBaseRef),
             },
             branchBaseRefByThreadKey:
               previous?.kind === "branch"
@@ -118,7 +147,26 @@ export const useDiffPanelStore = create<DiffPanelStoreState>()(
     }),
     {
       name: "t3code:diff-panel-state:v1",
-      version: 1,
+      version: 2,
+      migrate: (persisted) => {
+        const state = persisted as {
+          byThreadKey?: Record<string, DiffPanelSelection | { kind: "unstaged" }>;
+          branchBaseRefByThreadKey?: Record<string, string | null>;
+        };
+        const byThreadKey: Record<string, DiffPanelSelection> = {};
+        for (const [key, selection] of Object.entries(state.byThreadKey ?? {})) {
+          // v1 used kind "unstaged" for the unified dirty worktree (Uncommitted).
+          if (selection?.kind === "unstaged" && !("turnId" in selection)) {
+            byThreadKey[key] = { kind: "uncommitted" };
+          } else {
+            byThreadKey[key] = selection as DiffPanelSelection;
+          }
+        }
+        return {
+          byThreadKey,
+          branchBaseRefByThreadKey: state.branchBaseRefByThreadKey ?? {},
+        };
+      },
       storage: createJSONStorage(() =>
         resolveStorage(typeof window !== "undefined" ? window.localStorage : undefined),
       ),

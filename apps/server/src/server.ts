@@ -96,9 +96,13 @@ import * as NativeAppIconResolver from "./assets/NativeAppIconResolver.ts";
 import * as ProjectFaviconResolver from "./project/ProjectFaviconResolver.ts";
 import * as T3ProjectFileLoader from "./project/T3ProjectFileLoader.ts";
 import * as RepositoryIdentityResolver from "./project/RepositoryIdentityResolver.ts";
+import * as CodeWorkspaceFile from "./workspace/CodeWorkspaceFile.ts";
+import * as WorkspaceAuthorizedRoots from "./workspace/WorkspaceAuthorizedRoots.ts";
 import * as WorkspaceEntries from "./workspace/WorkspaceEntries.ts";
 import * as WorkspaceFileSystem from "./workspace/WorkspaceFileSystem.ts";
 import * as WorkspacePaths from "./workspace/WorkspacePaths.ts";
+import { ProjectionProjectRepositoryLive } from "./persistence/Layers/ProjectionProjects.ts";
+import { ProjectionThreadRepositoryLive } from "./persistence/Layers/ProjectionThreads.ts";
 import * as GitVcsDriver from "./vcs/GitVcsDriver.ts";
 import * as VcsDriverRegistry from "./vcs/VcsDriverRegistry.ts";
 import * as VcsProjectConfig from "./vcs/VcsProjectConfig.ts";
@@ -413,17 +417,28 @@ const DeviceLayerLive = DeviceService.layer.pipe(
   Layer.provide(NetService.layer),
 );
 
-const WorkspaceEntriesLayerLive = WorkspaceEntries.layer.pipe(Layer.provide(WorkspacePaths.layer));
+const WorkspaceAuthorizedRootsLayerLive = WorkspaceAuthorizedRoots.layer.pipe(
+  Layer.provide(ProjectionProjectRepositoryLive),
+  Layer.provide(ProjectionThreadRepositoryLive),
+);
+
+const WorkspaceEntriesLayerLive = WorkspaceEntries.layer.pipe(
+  Layer.provide(WorkspaceAuthorizedRootsLayerLive),
+  Layer.provide(WorkspacePaths.layer),
+);
 
 const WorkspaceFileSystemLayerLive = WorkspaceFileSystem.layer.pipe(
+  Layer.provide(WorkspaceAuthorizedRootsLayerLive),
   Layer.provide(WorkspacePaths.layer),
   Layer.provide(WorkspaceEntriesLayerLive),
 );
 
 const WorkspaceLayerLive = Layer.mergeAll(
   WorkspacePaths.layer,
+  WorkspaceAuthorizedRootsLayerLive,
   WorkspaceEntriesLayerLive,
   WorkspaceFileSystemLayerLive,
+  CodeWorkspaceFile.layer,
 );
 
 const ProjectFaviconResolverLayerLive = ProjectFaviconResolver.layer.pipe(

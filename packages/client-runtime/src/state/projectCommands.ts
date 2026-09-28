@@ -102,5 +102,11 @@ export function createProjectEnvironmentAtoms<R, E>(
           JSON.stringify([environmentId, input.cwd, input.relativePath]),
       },
     }),
+    resolveCodeWorkspace: createEnvironmentRpcQueryAtomFamily(runtime, {
+      label: "environment-data:projects:resolve-code-workspace",
+      tag: WS_METHODS.projectsResolveCodeWorkspace,
+      staleTimeMs: 15_000,
+      idleTtlMs: 60_000,
+    }),
   };
 }

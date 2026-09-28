@@ -40,7 +40,9 @@ import {
   ProjectFaviconPickerDialog,
 } from "./ProjectFaviconPickerDialog";
 import { ProjectActionsSettings } from "./ProjectActionsSettings";
+import { ProjectCodeWorkspaceSettings } from "./ProjectCodeWorkspaceSettings";
 import { ProjectDefaultsSettings } from "./ProjectDefaultsSettings";
+import { ProjectRepositorySettings } from "./ProjectRepositorySettings";
 import { projectGroupTitleNeedsUpdate } from "./ProjectSettingsPanel.logic";
 import { useSettingsProjectGroups } from "./useSettingsProjectGroups";
 
@@ -56,6 +58,13 @@ function memberKey(member: { environmentId: string; id: string }): string {
 
 /** `project` is the Projects page shortcut: the new-thread defaults people change most. */
 export type ProjectSettingsCategory = "general" | "integrations" | "source-control" | "project";
+
+function memberBrowsePlatform(os: string | null | undefined): string {
+  if (os === "windows") return "Win32";
+  if (os === "darwin") return "MacIntel";
+  if (os === "linux") return "Linux";
+  return "";
+}
 
 export function ProjectSettingsPanel({
   projectKey,
@@ -490,6 +499,36 @@ function ProjectDetail({
           />
         </SettingsSection>
         <ProjectDefaultsSettings category="project" />
+        {group.memberProjects.map((member) => (
+          <SettingsSection key={`workspace:${member.physicalProjectKey}`} title="VS Code workspace">
+            <ProjectCodeWorkspaceSettings
+              environmentId={member.environmentId}
+              projectId={member.id}
+              workspaceRoot={member.workspaceRoot}
+              workspaceFile={member.workspaceFile ?? null}
+              repoRoots={member.repoRoots ?? []}
+              platform={memberBrowsePlatform(
+                environmentById.get(member.environmentId)?.serverConfig?.environment.platform.os,
+              )}
+            />
+          </SettingsSection>
+        ))}
+        {group.memberProjects.map((member, index) => (
+          <SettingsSection
+            key={`repos:${member.physicalProjectKey}`}
+            id={index === 0 ? "project-repositories" : undefined}
+            title="Repositories"
+          >
+            <SettingsRow
+              title="Diff repositories"
+              description={`${member.environmentLabel ?? "Environment"} · ${member.workspaceRoot}`}
+            />
+            <ProjectRepositorySettings
+              environmentId={member.environmentId}
+              cwd={member.workspaceRoot}
+            />
+          </SettingsSection>
+        ))}
         <ProjectActionsSettings />
         {hasMultipleCheckouts ? checkoutChoices : null}
         <SettingsSection title="Danger">

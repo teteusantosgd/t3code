@@ -173,6 +173,18 @@ const makeProjectionThreadRepository = Effect.gen(function* () {
       `,
   });
 
+  const listActiveWorktreePathRows = SqlSchema.findAll({
+    Request: Schema.Void,
+    Result: Schema.Struct({ worktreePath: Schema.String }),
+    execute: () =>
+      sql`
+        SELECT DISTINCT worktree_path AS "worktreePath"
+        FROM projection_threads
+        WHERE deleted_at IS NULL
+          AND worktree_path IS NOT NULL
+      `,
+  });
+
   const upsert: ProjectionThreadRepositoryShape["upsert"] = (row) =>
     upsertProjectionThreadRow(row).pipe(
       Effect.mapError(toPersistenceSqlError("ProjectionThreadRepository.upsert:query")),
@@ -183,9 +195,18 @@ const makeProjectionThreadRepository = Effect.gen(function* () {
       Effect.mapError(toPersistenceSqlError("ProjectionThreadRepository.getById:query")),
     );
 
+  const listActiveWorktreePaths: ProjectionThreadRepositoryShape["listActiveWorktreePaths"] = () =>
+    listActiveWorktreePathRows().pipe(
+      Effect.map((rows) => rows.map((row) => row.worktreePath)),
+      Effect.mapError(
+        toPersistenceSqlError("ProjectionThreadRepository.listActiveWorktreePaths:query"),
+      ),
+    );
+
   return {
     upsert,
     getById,
+    listActiveWorktreePaths,
   } satisfies ProjectionThreadRepositoryShape;
 });
 

@@ -90,6 +90,7 @@ export const ProjectEntriesFailure = Schema.Literals([
   "workspace_root_create_failed",
   "workspace_root_stat_failed",
   "workspace_root_not_directory",
+  "workspace_cwd_not_authorized",
   "search_index_create_failed",
   "search_index_scan_timed_out",
   "search_index_search_failed",
@@ -215,6 +216,7 @@ export type ProjectReadFileResult = typeof ProjectReadFileResult.Type;
 export const ProjectFileFailure = Schema.Literals([
   "workspace_path_outside_root",
   "resolved_path_outside_root",
+  "workspace_cwd_not_authorized",
   "path_not_file",
   "binary_file",
   "operation_failed",
@@ -305,3 +307,45 @@ export class ProjectWriteFileError extends Schema.TaggedError<ProjectWriteFileEr
     } as any);
   }
 }
+
+/** Preview a VS Code `.code-workspace` before creating or linking a project. */
+export const ProjectResolveCodeWorkspaceInput = Schema.Struct({
+  workspaceFilePath: TrimmedNonEmptyString,
+});
+export type ProjectResolveCodeWorkspaceInput = typeof ProjectResolveCodeWorkspaceInput.Type;
+
+export const ProjectCodeWorkspaceFolder = Schema.Struct({
+  rawPath: TrimmedNonEmptyString,
+  name: TrimmedNonEmptyString,
+  absolutePath: TrimmedNonEmptyString,
+  exists: Schema.Boolean,
+  isGit: Schema.Boolean,
+});
+export type ProjectCodeWorkspaceFolder = typeof ProjectCodeWorkspaceFolder.Type;
+
+export const ProjectResolveCodeWorkspaceResult = Schema.Struct({
+  workspaceFilePath: TrimmedNonEmptyString,
+  /** Directory containing the workspace file — becomes `workspaceRoot`. */
+  anchorDir: TrimmedNonEmptyString,
+  folders: Schema.Array(ProjectCodeWorkspaceFolder),
+  /** Absolute paths of folders that exist and are Git repositories. */
+  repoRoots: Schema.Array(TrimmedNonEmptyString),
+});
+export type ProjectResolveCodeWorkspaceResult = typeof ProjectResolveCodeWorkspaceResult.Type;
+
+export const ProjectResolveCodeWorkspaceFailure = Schema.Literals([
+  "read_failed",
+  "parse_failed",
+  "invalid_folders",
+]);
+export type ProjectResolveCodeWorkspaceFailure = typeof ProjectResolveCodeWorkspaceFailure.Type;
+
+export class ProjectResolveCodeWorkspaceError extends Schema.TaggedError<ProjectResolveCodeWorkspaceError>()(
+  "ProjectResolveCodeWorkspaceError",
+  {
+    workspaceFilePath: TrimmedNonEmptyString,
+    failure: ProjectResolveCodeWorkspaceFailure,
+    message: TrimmedNonEmptyString,
+    cause: Schema.optional(Schema.Defect()),
+  },
+) {}

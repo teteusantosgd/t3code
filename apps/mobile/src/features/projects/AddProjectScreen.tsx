@@ -9,8 +9,11 @@ import {
   buildAddProjectRemoteSourceReadiness,
   buildProjectCreateCommand,
   canCreateProjectInEnvironment,
+  describeCodeWorkspaceFolder,
   findExistingAddProject,
   getAddProjectInitialQuery,
+  inferProjectTitleFromCodeWorkspaceFile,
+  isCodeWorkspaceFilePath,
   getCloneDestinationBrowsePath,
   getCloneDestinationPath,
   getCloneDirectoryName,
@@ -40,6 +43,7 @@ import {
   type EnvironmentId,
   type EnvironmentMachineKind,
   ProjectId,
+  type ProjectResolveCodeWorkspaceResult,
   resolveEnvironmentMachineKind,
 } from "@t3tools/contracts";
 import { CommonActions, StackActions, useNavigation } from "@react-navigation/native";
@@ -595,6 +599,25 @@ export function AddProjectSourceScreen() {
                 )
               }
             />
+            <ListRow
+              title="VS Code workspace"
+              subtitle="Open a .code-workspace file"
+              icon={
+                <SymbolView
+                  name="doc.text"
+                  size={Platform.OS === "android" ? 24 : 17}
+                  tintColorClassName="accent-icon"
+                  type="monochrome"
+                />
+              }
+              onPress={() =>
+                navigation.dispatch(
+                  StackActions.push("AddProjectWorkspace", {
+                    environmentId: selectedEnvironment.environmentId,
+                  }),
+                )
+              }
+            />
             {(["url", ...sortAddProjectProviderSources(readiness)] as AddProjectRemoteSource[]).map(
               (candidate) => (
                 <SourceControlRow
@@ -807,14 +830,24 @@ function FolderBrowser(props: {
     readonly selectedDirectoryName?: string;
   }) => Promise<boolean>;
   readonly pinnedDirectoryName?: string;
+  readonly includeFileExtensions?: ReadonlyArray<string>;
+  readonly onSelectWorkspaceFile?: (fullPath: string) => void;
 }) {
   const browsePath = useMemo(
     () => getFilesystemBrowsePath(props.pathInput, props.environment.platform),
     [props.environment.platform, props.pathInput],
   );
   const browseInput = useMemo(
-    () => (browsePath.directoryPath.length > 0 ? { partialPath: browsePath.directoryPath } : null),
-    [browsePath.directoryPath],
+    () =>
+      browsePath.directoryPath.length > 0
+        ? {
+            partialPath: browsePath.directoryPath,
+            ...(props.includeFileExtensions
+              ? { includeFileExtensions: [...props.includeFileExtensions] }
+              : {}),
+          }
+        : null,
+    [browsePath.directoryPath, props.includeFileExtensions],
   );
   const browseState = useEnvironmentQuery(
     browseInput === null
@@ -873,16 +906,29 @@ function FolderBrowser(props: {
             key={entry.fullPath}
             title={entry.name}
             icon={
-              <SymbolView
-                name="folder"
-                size={Platform.OS === "android" ? 24 : 17}
-                tintColorClassName="accent-icon-muted"
-                type="monochrome"
-              />
+              entry.kind === "file" ? (
+                <SymbolView
+                  name="doc"
+                  size={Platform.OS === "android" ? 24 : 17}
+                  tintColorClassName="accent-icon-muted"
+                  type="monochrome"
+                />
+              ) : (
+                <SymbolView
+                  name="folder"
+                  size={Platform.OS === "android" ? 24 : 17}
+                  tintColorClassName="accent-icon-muted"
+                  type="monochrome"
+                />
+              )
             }
             isFirst={index === 0 && !browsePath.canBrowseUp}
             right={null}
             onPress={() => {
+              if (entry.kind === "file" && props.onSelectWorkspaceFile) {
+                props.onSelectWorkspaceFile(entry.fullPath);
+                return;
+              }
               void props.navigateToBrowsePath({
                 browseDirectoryPath: browsePath.directoryPath,
                 selectedDirectoryName: entry.name,
@@ -1096,7 +1142,198 @@ export function AddProjectDestinationScreen(props: {
             navigateToBrowsePath={navigateToBrowsePath}
             pathInput={pathInput}
             setPathInput={setPathInput}
-            pinnedDirectoryName={repositoryName}
+          />
+        </>
+      ) : (
+        <EmptyEnvironmentState />
+      )}
+    </AddProjectShell>
+  );
+}
+
+const CODE_WORKSPACE_EXTENSIONS = [".code-workspace"] as const;
+
+function WorkspaceFolderPreview(props: { readonly preview: ProjectResolveCodeWorkspaceResult }) {
+  return (
+    <View className="gap-2 rounded-[24px] bg-card px-4 py-3">
+      <Text className="text-base font-t3-bold">Workspace folders</Text>
+      {props.preview.folders.map((folder) => (
+        <View key={folder.absolutePath} className="gap-0.5">
+          <Text className="text-sm font-t3-bold">{folder.name}</Text>
+          <Text className="text-xs text-foreground-muted">
+            {describeCodeWorkspaceFolder(folder)}
+          </Text>
+        </View>
+      ))}
+    </View>
+  );
+}
+
+export function AddProjectWorkspaceScreen(props: { readonly environmentId?: string | string[] }) {
+  const resolveWorkspace = useAtomQueryRunner(projectEnvironment.resolveCodeWorkspace, {
+    reportFailure: false,
+  });
+  const createProject = useAtomCommand(projectEnvironment.create, { reportFailure: false });
+  const navigation = useNavigation();
+  const environment = useEnvironmentFromParam(props.environmentId);
+  const projects = useProjects();
+  const { isBrowseNavigating, navigateToBrowsePath, pathInput, setPathInput } =
+    useBrowsePathInput(environment);
+  const [preview, setPreview] = useState<ProjectResolveCodeWorkspaceResult | null>(null);
+  const [isResolving, setIsResolving] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const resolveWorkspaceFile = useCallback(
+    async (rawPath: string) => {
+      if (!environment || isBrowseNavigating || isResolving) return null;
+      setError(null);
+      const resolved = resolveAddProjectPath({
+        rawPath,
+        currentProjectCwd: null,
+        platform: environment.platform,
+      });
+      if (!resolved.ok) {
+        setError(resolved.error);
+        return null;
+      }
+      if (!isCodeWorkspaceFilePath(resolved.path)) {
+        setError("Path must end with .code-workspace.");
+        return null;
+      }
+      setIsResolving(true);
+      const result = await resolveWorkspace({
+        environmentId: environment.environmentId,
+        input: { workspaceFilePath: resolved.path },
+      });
+      setIsResolving(false);
+      if (AsyncResult.isFailure(result)) {
+        setError(errorMessage(Cause.squash(result.cause)));
+        return null;
+      }
+      setPreview(result.value);
+      setPathInput(result.value.workspaceFilePath);
+      return result.value;
+    },
+    [environment, isBrowseNavigating, isResolving, resolveWorkspace, setPathInput],
+  );
+
+  const submitWorkspace = useCallback(async () => {
+    if (!environment || isBrowseNavigating || isSubmitting) return;
+    setError(null);
+    const resolvedPreview = preview ?? (await resolveWorkspaceFile(pathInput));
+    if (!resolvedPreview) return;
+
+    const existing = findExistingAddProject({
+      projects,
+      environmentId: environment.environmentId,
+      path: resolvedPreview.anchorDir,
+    });
+    if (existing) {
+      Alert.alert("Project already exists", existing.title);
+      navigation.dispatch(
+        CommonActions.reset({
+          index: 0,
+          routes: [
+            {
+              name: "NewTaskDraft",
+              params: {
+                environmentId: existing.environmentId,
+                projectId: existing.id,
+                title: existing.title,
+              },
+            },
+          ],
+        }),
+      );
+      return;
+    }
+
+    setIsSubmitting(true);
+    const projectId = ProjectId.make(uuidv4());
+    const command = buildProjectCreateCommand({
+      commandId: CommandId.make(uuidv4()),
+      projectId,
+      workspaceRoot: resolvedPreview.anchorDir,
+      createdAt: new Date().toISOString(),
+    });
+    const result = await createProject({
+      environmentId: environment.environmentId,
+      input: {
+        ...command,
+        title: inferProjectTitleFromCodeWorkspaceFile(resolvedPreview.workspaceFilePath),
+        workspaceRoot: resolvedPreview.anchorDir,
+        workspaceFile: resolvedPreview.workspaceFilePath,
+        createWorkspaceRootIfMissing: false,
+      },
+    });
+    setIsSubmitting(false);
+    if (AsyncResult.isFailure(result)) {
+      setError(errorMessage(Cause.squash(result.cause)));
+      return;
+    }
+    navigation.dispatch(
+      CommonActions.reset({
+        index: 0,
+        routes: [
+          {
+            name: "NewTaskDraft",
+            params: {
+              environmentId: environment.environmentId,
+              projectId,
+              title: inferProjectTitleFromCodeWorkspaceFile(resolvedPreview.workspaceFilePath),
+            },
+          },
+        ],
+      }),
+    );
+  }, [
+    createProject,
+    environment,
+    isBrowseNavigating,
+    isSubmitting,
+    navigation,
+    pathInput,
+    preview,
+    projects,
+    resolveWorkspaceFile,
+  ]);
+
+  return (
+    <AddProjectShell title="VS Code workspace">
+      {error ? <ErrorBanner message={error} /> : null}
+      {environment ? (
+        <>
+          <ProjectPathInput
+            value={pathInput}
+            onChangeText={(value) => {
+              setPathInput(value);
+              setPreview(null);
+            }}
+            onSubmit={() => void resolveWorkspaceFile(pathInput)}
+          />
+          <PrimaryActionButton
+            label={preview ? "Add project" : "Preview workspace"}
+            disabled={isBrowseNavigating || isSubmitting || isResolving}
+            loading={isSubmitting || isResolving}
+            onPress={() => {
+              if (preview) {
+                void submitWorkspace();
+              } else {
+                void resolveWorkspaceFile(pathInput);
+              }
+            }}
+          />
+          {preview ? <WorkspaceFolderPreview preview={preview} /> : null}
+          <FolderBrowser
+            environment={environment}
+            includeFileExtensions={CODE_WORKSPACE_EXTENSIONS}
+            navigateToBrowsePath={navigateToBrowsePath}
+            onSelectWorkspaceFile={(fullPath) => {
+              void resolveWorkspaceFile(fullPath);
+            }}
+            pathInput={pathInput}
+            setPathInput={setPathInput}
           />
         </>
       ) : (

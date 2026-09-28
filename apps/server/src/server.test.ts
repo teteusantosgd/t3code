@@ -163,6 +163,7 @@ import * as T3ProjectFileLoader from "./project/T3ProjectFileLoader.ts";
 import * as ProjectSetupScriptRunner from "./project/ProjectSetupScriptRunner.ts";
 import * as RepositoryIdentityResolver from "./project/RepositoryIdentityResolver.ts";
 import * as ServerEnvironment from "./environment/ServerEnvironment.ts";
+import * as WorkspaceAuthorizedRoots from "./workspace/WorkspaceAuthorizedRoots.ts";
 import * as WorkspaceEntries from "./workspace/WorkspaceEntries.ts";
 import * as WorkspaceFileSystem from "./workspace/WorkspaceFileSystem.ts";
 import * as WorkspacePaths from "./workspace/WorkspacePaths.ts";
@@ -709,14 +710,22 @@ const buildAppUnderTest = (options?: {
     const gitManagerLayer = Layer.mock(GitManager.GitManager)({
       ...options?.layers?.gitManager,
     });
+    const workspaceAuthorizedRootsTestLayer = Layer.mock(
+      WorkspaceAuthorizedRoots.WorkspaceAuthorizedRoots,
+    )({
+      ensureFilesCwdAuthorized: () => Effect.void,
+    });
     const workspaceEntriesLayer = WorkspaceEntries.layer.pipe(
+      Layer.provide(workspaceAuthorizedRootsTestLayer),
       Layer.provide(WorkspacePaths.layer),
       Layer.provideMerge(vcsDriverRegistryLayer),
     );
     const workspaceAndProjectServicesLayer = Layer.mergeAll(
       WorkspacePaths.layer,
+      workspaceAuthorizedRootsTestLayer,
       workspaceEntriesLayer,
       WorkspaceFileSystem.layer.pipe(
+        Layer.provide(workspaceAuthorizedRootsTestLayer),
         Layer.provide(WorkspacePaths.layer),
         Layer.provide(workspaceEntriesLayer),
       ),

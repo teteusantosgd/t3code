@@ -25,6 +25,7 @@ import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
 
+import * as WorkspaceAuthorizedRoots from "./WorkspaceAuthorizedRoots.ts";
 import * as WorkspaceEntries from "./WorkspaceEntries.ts";
 import * as WorkspacePaths from "./WorkspacePaths.ts";
 
@@ -96,6 +97,8 @@ export class WorkspaceBinaryFileError extends Schema.TaggedError<WorkspaceBinary
 }
 
 export const WorkspaceFileSystemError = Schema.Union([
+  WorkspaceAuthorizedRoots.WorkspaceAuthorizedRootsLoadError,
+  WorkspaceAuthorizedRoots.WorkspaceCwdNotAuthorizedError,
   WorkspaceFileSystemOperationError,
   WorkspaceFilePathEscapeError,
   WorkspacePathNotFileError,
@@ -138,6 +141,7 @@ export const make = Effect.gen(function* () {
   const path = yield* Path.Path;
   const workspacePaths = yield* WorkspacePaths.WorkspacePaths;
   const workspaceEntries = yield* WorkspaceEntries.WorkspaceEntries;
+  const workspaceAuthorizedRoots = yield* WorkspaceAuthorizedRoots.WorkspaceAuthorizedRoots;
 
   /**
    * Resolves the file a read targets. Workspace-relative paths must stay inside the
@@ -212,6 +216,7 @@ export const make = Effect.gen(function* () {
   const readFile: WorkspaceFileSystem["Service"]["readFile"] = Effect.fn(
     "WorkspaceFileSystem.readFile",
   )(function* (input) {
+    yield* workspaceAuthorizedRoots.ensureFilesCwdAuthorized(input.cwd);
     const target = yield* resolveReadTarget(input);
     const realTargetPath = target.realTargetPath;
 
@@ -305,6 +310,7 @@ export const make = Effect.gen(function* () {
   const writeFile: WorkspaceFileSystem["Service"]["writeFile"] = Effect.fn(
     "WorkspaceFileSystem.writeFile",
   )(function* (input) {
+    yield* workspaceAuthorizedRoots.ensureFilesCwdAuthorized(input.cwd);
     const target = yield* workspacePaths.resolveRelativePathWithinRoot({
       workspaceRoot: input.cwd,
       relativePath: input.relativePath,

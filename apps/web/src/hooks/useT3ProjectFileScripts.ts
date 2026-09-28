@@ -30,10 +30,15 @@ export interface T3ProjectFileState {
  * file exists but is broken — which the runtime otherwise swallows silently.
  */
 export function useT3ProjectFileState(
-  environmentId: EnvironmentId,
+  environmentId: EnvironmentId | null,
   cwd: string | null,
 ): T3ProjectFileState {
-  const query = useProjectFileQuery(environmentId, cwd ?? "", T3_PROJECT_FILE_NAME, cwd !== null);
+  const query = useProjectFileQuery(
+    environmentId ?? ("" as EnvironmentId),
+    cwd ?? "",
+    T3_PROJECT_FILE_NAME,
+    environmentId !== null && cwd !== null,
+  );
   const contents = query.data && !query.data.truncated ? query.data.contents : null;
   const isPending = query.isPending;
   return useMemo(() => {

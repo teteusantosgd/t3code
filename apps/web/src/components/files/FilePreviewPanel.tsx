@@ -39,6 +39,7 @@ import { resolveDiffThemeName } from "~/lib/diffRendering";
 import { PREFERRED_HIGHLIGHTER } from "~/lib/syntaxHighlighting";
 import { cn } from "~/lib/utils";
 import { isPreviewSupportedInRuntime } from "~/previewStateStore";
+import { resolveProjectFileTarget } from "~/lib/projectFileRoots";
 import { isAbsolutePath, resolvePathLinkTarget } from "~/terminal-links";
 import { ScrollArea } from "~/components/ui/scroll-area";
 import { stackedThreadToast, toastManager } from "~/components/ui/toast";
@@ -107,6 +108,7 @@ interface FilePreviewPanelProps {
   onPendingChange: (relativePath: string, pending: boolean) => void;
   selectedFilePending: boolean;
   workspaceMutationId: string | null;
+  repoRoots?: ReadonlyArray<string> | null;
 }
 
 const FILE_EXPLORER_STORAGE_KEY = "t3code.fileExplorerOpen";
@@ -919,6 +921,7 @@ export default function FilePreviewPanel({
   onPendingChange,
   selectedFilePending,
   workspaceMutationId,
+  repoRoots = null,
 }: FilePreviewPanelProps) {
   const { resolvedTheme } = useTheme();
   const wordWrap = useClientSettings((settings) => settings.wordWrap);
@@ -941,11 +944,25 @@ export default function FilePreviewPanel({
   // A file outside the workspace (an absolute path) is shown, never edited.
   const isHostFile =
     attachment !== undefined || (relativePath !== null && isAbsolutePath(relativePath));
+  const workspaceFileTarget = useMemo(() => {
+    if (relativePath === null || attachment !== undefined || isAbsolutePath(relativePath)) {
+      return null;
+    }
+    return resolveProjectFileTarget({ treePath: relativePath, workspaceRoot: cwd, repoRoots });
+  }, [attachment, cwd, relativePath, repoRoots]);
+  const fileCwd = workspaceFileTarget?.cwd ?? cwd;
+  const fileRelativePath =
+    workspaceFileTarget === null ? relativePath : workspaceFileTarget.relativePath;
   // Media and PDFs render from their absolute path, so their contents are never
   // shown. The read still runs: a folder named `assets.png` is only knowable as a
   // folder from the read failure, and the server stats before reading, so a folder
   // costs an open and a stat and returns no body.
-  const file = useProjectFileQuery(environmentId, cwd, relativePath, attachment === undefined);
+  const file = useProjectFileQuery(
+    environmentId,
+    fileCwd,
+    fileRelativePath,
+    attachment === undefined,
+  );
   // A chat link cannot tell a folder from a file, so a folder arrives here as
   // a file surface and the read fails. Keep the breadcrumbs, drop the preview
   // pane, and let the tree fill the surface with the folder revealed. Mutation
@@ -1025,7 +1042,9 @@ export default function FilePreviewPanel({
     isPreviewSupportedInRuntime() &&
     isBrowserPreviewFile(previewPath);
   const absolutePath =
-    relativePath && attachment === undefined ? resolvePathLinkTarget(relativePath, cwd) : null;
+    fileRelativePath && attachment === undefined
+      ? resolvePathLinkTarget(fileRelativePath, fileCwd)
+      : null;
   const onFilePostRender = useFileLineReveal(relativePath, revealLine, revealRequestId);
   useWorkspaceMutationRefresh({
     enabled:
@@ -1038,7 +1057,7 @@ export default function FilePreviewPanel({
       !selectedFilePending,
     mutationId: workspaceMutationId,
     refresh: file.refresh,
-    resourceKey: `file:${environmentId}:${cwd}:${relativePath ?? ""}`,
+    resourceKey: `file:${environmentId}:${fileCwd}:${fileRelativePath ?? ""}`,
   });
 
   useEffect(() => {
@@ -1194,7 +1213,7 @@ export default function FilePreviewPanel({
               environmentId={environmentId}
               threadRef={threadRef}
               absolutePath={absolutePath}
-              workspaceRoot={cwd}
+              workspaceRoot={fileCwd}
               name={relativePath}
               workspaceMutationId={workspaceMutationId}
             />
@@ -1213,7 +1232,7 @@ export default function FilePreviewPanel({
               environmentId={environmentId}
               threadRef={threadRef}
               absolutePath={absolutePath}
-              workspaceRoot={cwd}
+              workspaceRoot={fileCwd}
               alt={relativePath}
               workspaceMutationId={workspaceMutationId}
             />
@@ -1223,7 +1242,7 @@ export default function FilePreviewPanel({
               environmentId={environmentId}
               threadRef={threadRef}
               absolutePath={absolutePath}
-              workspaceRoot={cwd}
+              workspaceRoot={fileCwd}
               title={relativePath}
               workspaceMutationId={workspaceMutationId}
             />
@@ -1243,8 +1262,8 @@ export default function FilePreviewPanel({
               <RenderedMarkdownSurface
                 key={relativePath}
                 environmentId={environmentId}
-                cwd={cwd}
-                relativePath={relativePath}
+                cwd={fileCwd}
+                relativePath={fileRelativePath ?? relativePath}
                 threadRef={threadRef}
                 contents={file.data.contents}
                 readOnly={isHostFile}
@@ -1261,7 +1280,11 @@ export default function FilePreviewPanel({
               <SourceFilePreview
                 name={relativePath}
                 text={file.data.contents}
-                cacheKey={projectFileCacheKey(cwd, relativePath, file.data.contents)}
+                cacheKey={projectFileCacheKey(
+                  fileCwd,
+                  fileRelativePath ?? relativePath,
+                  file.data.contents,
+                )}
                 onPostRender={onFilePostRender}
               />
             ) : (
@@ -1269,8 +1292,8 @@ export default function FilePreviewPanel({
                 <EditableFileSurface
                   key={`${relativePath}:${resolvedTheme}`}
                   environmentId={environmentId}
-                  cwd={cwd}
-                  relativePath={relativePath}
+                  cwd={fileCwd}
+                  relativePath={fileRelativePath ?? relativePath}
                   composerDraftTarget={composerDraftTarget}
                   contents={file.data.contents}
                   resolvedTheme={resolvedTheme}
@@ -1300,6 +1323,7 @@ export default function FilePreviewPanel({
               selectedPath={relativePath}
               selectedPathRevealId={revealRequestId}
               onOpenFile={onOpenFile}
+              repoRoots={repoRoots}
               workspaceMutationId={workspaceMutationId}
               {...(previewPath && !isMedia && !isPdf
                 ? { onRefreshSelectedFile: file.refresh }

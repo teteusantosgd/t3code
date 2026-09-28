@@ -21,6 +21,7 @@ import {
 import { useScopedSettings, useUpdateScopedSettings } from "./useScopedSettings";
 import { useSettingsScope } from "./SettingsScopeContext";
 import { ProjectDefaultsSettings } from "./ProjectDefaultsSettings";
+import { ProjectRepositorySettings } from "./ProjectRepositorySettings";
 import { cn } from "../../lib/utils";
 import { useEnvironmentQuery } from "../../state/query";
 import { sourceControlEnvironment } from "../../state/sourceControl";
@@ -62,6 +63,7 @@ import {
   PolicyTooltip,
   SettingResetButton,
   SettingsPageContainer,
+  SettingsRow,
   SettingsSearchTarget,
   SettingsSection,
   useSettingsSearchTargetId,
@@ -499,6 +501,40 @@ function EmptySourceControlDiscovery({
   );
 }
 
+function DiffRepositorySettingsSections() {
+  const { scope } = useSettingsScope();
+  if (scope.kind !== "project" && scope.kind !== "checkout") {
+    return (
+      <SettingsSection id="project-repositories" title="Diff repositories">
+        <p className="px-4 py-3 text-sm text-muted-foreground">
+          Choose a project above to edit repository paths used by Diff All repos in that
+          checkout&apos;s t3.json.
+        </p>
+      </SettingsSection>
+    );
+  }
+  return (
+    <>
+      {scope.members.map((member, index) => (
+        <SettingsSection
+          key={`repos:${member.physicalProjectKey}`}
+          id={index === 0 ? "project-repositories" : undefined}
+          title="Diff repositories"
+        >
+          <SettingsRow
+            title="Checkout"
+            description={`${member.environmentLabel ?? "Environment"} · ${member.workspaceRoot}`}
+          />
+          <ProjectRepositorySettings
+            environmentId={member.environmentId}
+            cwd={member.workspaceRoot}
+          />
+        </SettingsSection>
+      ))}
+    </>
+  );
+}
+
 export function SourceControlSettingsPanel() {
   const { scope, environment, connectedEnvironments } = useSettingsScope();
   // Discovery scans one machine's tools, so it shows the representative
@@ -545,6 +581,7 @@ export function SourceControlSettingsPanel() {
   return (
     <SettingsPageContainer>
       <ProjectDefaultsSettings category="source-control" />
+      <DiffRepositorySettingsSections />
       {environmentId === null ? (
         <SettingsSection id={searchableSetting("source-control").id} title="Server environment">
           <p className="px-4 py-3 text-sm text-muted-foreground">

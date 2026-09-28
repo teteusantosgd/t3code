@@ -742,6 +742,35 @@ describe("buildBrowseGroups", () => {
     await action;
     expect(actionSettled).toBe(true);
   });
+
+  it("selects workspace files instead of browsing into them", async () => {
+    const browseTo = vi.fn();
+    const selectWorkspaceFile = vi.fn();
+    const groups = buildBrowseGroups({
+      browseEntries: [
+        { name: "app.code-workspace", fullPath: "/Users/test/app.code-workspace", kind: "file" },
+      ],
+      browseQuery: "~/",
+      canBrowseUp: false,
+      upIcon: null,
+      directoryIcon: null,
+      fileIcon: null,
+      browseUp: vi.fn(),
+      browseTo,
+      selectWorkspaceFile,
+    });
+    const item = groups[0]?.items[0];
+    if (!item || item.kind !== "action") {
+      throw new Error("Expected a browse action");
+    }
+    await item.run();
+    expect(selectWorkspaceFile).toHaveBeenCalledWith({
+      name: "app.code-workspace",
+      fullPath: "/Users/test/app.code-workspace",
+      kind: "file",
+    });
+    expect(browseTo).not.toHaveBeenCalled();
+  });
 });
 
 describe("filterPinnedBrowseEntries", () => {

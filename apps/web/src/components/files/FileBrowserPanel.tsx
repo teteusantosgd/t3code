@@ -7,9 +7,19 @@ import type { EnvironmentId, ProjectEntry } from "@t3tools/contracts";
 import { FileTree, useFileTree, useFileTreeSearch, useFileTreeSelector } from "@pierre/trees/react";
 import { serializeComposerFileLink } from "@t3tools/shared/composerTrigger";
 import { ChevronsDownUpIcon, ChevronsUpDownIcon } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 
 import { Button } from "~/components/ui/button";
+import {
+  Dialog,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogPanel,
+  DialogPopup,
+  DialogTitle,
+} from "~/components/ui/dialog";
+import { Input } from "~/components/ui/input";
 import { InputGroup, InputGroupInput } from "~/components/ui/input-group";
 import { toastManager } from "~/components/ui/toast";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "~/components/ui/tooltip";
@@ -18,15 +28,23 @@ import { writeTextToClipboard } from "~/hooks/useCopyToClipboard";
 import { useTheme } from "~/hooks/useTheme";
 import { useWorkspaceMutationRefresh } from "~/hooks/useWorkspaceMutationRefresh";
 import { useFileContextMenu, type FileContextMenuAction } from "~/fileContextMenu";
+import {
+  isMultiRootFileBrowsing,
+  projectFileBrowserRoots,
+  resolveProjectFileTarget,
+} from "~/lib/projectFileRoots";
 import { readLocalApi } from "~/localApi";
 import { T3_PIERRE_ICONS } from "~/pierre-icons";
 import { PIERRE_TREE_UNSAFE_CSS, pierreTreeStyle } from "~/pierre-tree-theme";
+import { projectEnvironment } from "~/state/projects";
+import { useProjectPathSearch } from "~/state/queries";
+import { useAtomCommand } from "~/state/use-atom-command";
 
 import { createFileTreeDragMentionController } from "./fileTreeDragMention";
 import { areAllDirectoriesExpanded, setAllDirectoriesExpanded } from "./fileTreeExpansion";
 import { buildFileTreePathUpdates } from "./fileTreePathReconciliation";
+import { buildNewWorkspaceFilePath, resolveNewFileDirectory } from "./newWorkspaceFile";
 import { useDirectoryEntries } from "./useDirectoryEntries";
-import { useProjectPathSearch } from "~/state/queries";
 
 interface FileBrowserPanelProps {
   environmentId: EnvironmentId;
@@ -39,6 +57,7 @@ interface FileBrowserPanelProps {
   onOpenFile: (relativePath: string) => void;
   onRefreshSelectedFile?: () => void;
   workspaceMutationId: string | null;
+  repoRoots?: ReadonlyArray<string> | null;
 }
 
 function treePath(entry: ProjectEntry): string {
@@ -103,10 +122,23 @@ export default function FileBrowserPanel({
   onOpenFile,
   onRefreshSelectedFile,
   workspaceMutationId,
+  repoRoots = null,
 }: FileBrowserPanelProps) {
   const { resolvedTheme } = useTheme();
+  const multiRoot = isMultiRootFileBrowsing(repoRoots);
+  const browserRoots = useMemo(
+    () => projectFileBrowserRoots({ workspaceRoot: cwd, repoRoots }),
+    [cwd, repoRoots],
+  );
+  const defaultNewFileDirectory = multiRoot ? (browserRoots[0]?.label ?? "") : "";
   const composerRef = useComposerHandleContext();
   const fileContextMenu = useFileContextMenu(environmentId);
+  const writeFile = useAtomCommand(projectEnvironment.writeFile, { reportFailure: false });
+  const newFileNameInputId = useId();
+  const resolveTreePath = useCallback(
+    (treePath: string) => resolveProjectFileTarget({ treePath, workspaceRoot: cwd, repoRoots }),
+    [cwd, repoRoots],
+  );
   const {
     entries: directoryEntries,
     load,
@@ -114,10 +146,17 @@ export default function FileBrowserPanel({
     ready,
     error,
     isPending,
-  } = useDirectoryEntries(environmentId, cwd);
+  } = useDirectoryEntries(environmentId, cwd, repoRoots);
   const [query, setQuery] = useState("");
   const [expandAll, setExpandAll] = useState(false);
-  const pathSearch = useProjectPathSearch({ environmentId, cwd, query: query.slice(0, 256) }, 200);
+  // null closed; string is the directory path ("" = project root).
+  const [newFileDirectory, setNewFileDirectory] = useState<string | null>(null);
+  const [newFileName, setNewFileName] = useState("");
+  const [isCreatingFile, setIsCreatingFile] = useState(false);
+  const pathSearch = useProjectPathSearch(
+    { environmentId, cwd, query: multiRoot ? null : query.slice(0, 256) },
+    200,
+  );
   const entries = useMemo(() => {
     const result = new Map(directoryEntries.map((entry) => [entry.path, entry]));
     if (query.trim() && !pathSearch.isPending) {
@@ -143,6 +182,7 @@ export default function FileBrowserPanel({
     [entries],
   );
   const previousTreePathsRef = useRef<readonly string[] | null>(null);
+  const treeModelRef = useRef<ReturnType<typeof useFileTree>["model"] | null>(null);
   const syncingSelectionRef = useRef(false);
   const treeSelectionPathRef = useRef<string | null>(null);
   const handledRevealRef = useRef<{ path: string; revealId: number } | null>(null);
@@ -159,6 +199,64 @@ export default function FileBrowserPanel({
     return () => document.removeEventListener("contextmenu", capturePointer, true);
   }, []);
 
+  const openNewFileDialog = (directoryPath: string) => {
+    setNewFileDirectory(directoryPath);
+    setNewFileName("");
+  };
+
+  const closeNewFileDialog = () => {
+    if (isCreatingFile) return;
+    setNewFileDirectory(null);
+    setNewFileName("");
+  };
+
+  const createNewFile = async () => {
+    if (newFileDirectory === null || isCreatingFile) return;
+    const treePath = buildNewWorkspaceFilePath(newFileDirectory, newFileName);
+    if (treePath === null) {
+      toastManager.add({ type: "warning", title: "Enter a valid file name" });
+      return;
+    }
+    if (entryKindsRef.current.has(treePath)) {
+      toastManager.add({
+        type: "error",
+        title: "File already exists",
+        description: treePath,
+      });
+      return;
+    }
+    const { cwd: writeCwd, relativePath } = resolveTreePath(treePath);
+
+    setIsCreatingFile(true);
+    try {
+      const result = await writeFile({
+        environmentId,
+        input: { cwd: writeCwd, relativePath, contents: "" },
+      });
+      if (result._tag === "Failure") {
+        toastManager.add({
+          type: "error",
+          title: "Could not create file",
+          description: treePath,
+        });
+        return;
+      }
+      const parentDirectory = newFileDirectory;
+      setNewFileDirectory(null);
+      setNewFileName("");
+      if (parentDirectory) {
+        const parentItem =
+          treeModelRef.current?.getItem(`${parentDirectory}/`) ??
+          treeModelRef.current?.getItem(parentDirectory);
+        if (parentItem && "expand" in parentItem) parentItem.expand();
+      }
+      await load(parentDirectory, true);
+      onOpenFile(treePath);
+    } finally {
+      setIsCreatingFile(false);
+    }
+  };
+
   /** Combines the file actions (open/reveal/open with) with the panel's own mention actions. */
   const showEntryContextMenu = async (
     item: TreeContextMenuItem,
@@ -169,26 +267,42 @@ export default function FileBrowserPanel({
       context.close();
       return;
     }
-    const relativePath = item.path.replace(/\/$/, "");
-    const mention = serializeComposerFileLink(relativePath);
+    const treePath = item.path.replace(/\/$/, "");
+    const { cwd: fileCwd, relativePath } = resolveTreePath(treePath);
+    const mention = serializeComposerFileLink(treePath);
     const pointer = contextMenuPointerRef.current;
     const pointerIsFresh = pointer !== null && performance.now() - pointer.at < 1000;
     const anchorRect = context.anchorElement.getBoundingClientRect();
     const position = pointerIsFresh
       ? { x: pointer.x, y: pointer.y }
       : { x: anchorRect.left, y: anchorRect.bottom };
-    const fileTarget = { environmentId, filePath: relativePath, workspaceRoot: cwd };
+    const fileTarget = { environmentId, filePath: relativePath, workspaceRoot: fileCwd };
     const fileMenuItems = fileContextMenu.buildItems(fileTarget);
+    const newFileDirectoryPath = resolveNewFileDirectory({
+      kind: item.kind,
+      path: item.path,
+    });
     try {
       const clicked = await api.contextMenu.show(
         [
-          ...fileMenuItems,
-          { id: "copy-mention", label: "Copy mention" },
+          { id: "new-file", label: "New File", icon: "pencil" },
+          ...fileMenuItems.map((entry, index) =>
+            index === 0 ? { ...entry, separatorBefore: true } : entry,
+          ),
+          {
+            id: "copy-mention",
+            label: "Copy mention",
+            separatorBefore: fileMenuItems.length === 0,
+          },
           { id: "add-to-chat", label: "Add to chat" },
         ],
         position,
       );
       if (clicked === null) return;
+      if (clicked === "new-file") {
+        openNewFileDialog(newFileDirectoryPath);
+        return;
+      }
       // "Open with" submenu selections report the child id ("editor:<id>"),
       // which is not present in the top-level item list.
       const isFileMenuAction =
@@ -200,7 +314,7 @@ export default function FileBrowserPanel({
       if (clicked === "copy-mention") {
         try {
           await writeTextToClipboard(mention);
-          toastManager.add({ type: "success", title: "Mention copied", description: relativePath });
+          toastManager.add({ type: "success", title: "Mention copied", description: treePath });
         } catch (error) {
           toastManager.add({
             type: "error",
@@ -238,7 +352,6 @@ export default function FileBrowserPanel({
     showEntryContextMenuRef.current = showEntryContextMenu;
   });
 
-  const treeModelRef = useRef<ReturnType<typeof useFileTree>["model"] | null>(null);
   const dragMention = useMemo(
     () =>
       createFileTreeDragMentionController({
@@ -481,11 +594,33 @@ export default function FileBrowserPanel({
     };
   }, [dragMention]);
 
+  const showRootNewFileMenu = async (position: { x: number; y: number }) => {
+    const api = readLocalApi();
+    if (!api) return;
+    const clicked = await api.contextMenu.show(
+      [{ id: "new-file", label: "New File", icon: "pencil" }],
+      position,
+    );
+    if (clicked === "new-file") openNewFileDialog(defaultNewFileDirectory);
+  };
+
   return (
     <div
       ref={panelRef}
       className="flex min-h-0 flex-1 flex-col bg-background"
       data-file-browser-panel={`${environmentId}:${cwd}`}
+      onContextMenu={(event) => {
+        // Empty-area right-click creates at the project root. Row menus are
+        // handled by Pierre and stop here when the composed path hits a row.
+        const onTreeRow = event.nativeEvent
+          .composedPath()
+          .some(
+            (target) => target instanceof Element && target.getAttribute("data-type") === "item",
+          );
+        if (onTreeRow) return;
+        event.preventDefault();
+        void showRootNewFileMenu({ x: event.clientX, y: event.clientY });
+      }}
     >
       <div
         className="flex h-10 min-h-10 shrink-0 items-center gap-1 border-b border-border/60 bg-background px-2 in-data-[preview-panel-mode=inline]:mb-1 in-data-[preview-panel-mode=inline]:h-9 in-data-[preview-panel-mode=inline]:min-h-9 in-data-[preview-panel-mode=inline]:border-b-transparent"
@@ -542,8 +677,11 @@ export default function FileBrowserPanel({
           More matches available. Refine your search.
         </div>
       ) : null}
+      {/* Keep loading out of document flow: inserting a visible banner here
+          shifts every tree row when a folder expands (isPending toggles). The
+          refresh icon already spins for the same state. */}
       {(isPending || pathSearch.isPending) && (
-        <div role="status" className="px-3 py-1 text-xs text-muted-foreground">
+        <div role="status" className="sr-only">
           Loading files…
         </div>
       )}
@@ -553,6 +691,59 @@ export default function FileBrowserPanel({
         className="min-h-0 flex-1 overflow-hidden"
         style={pierreTreeStyle(resolvedTheme)}
       />
+      <Dialog
+        open={newFileDirectory !== null}
+        onOpenChange={(open) => {
+          if (!open) closeNewFileDialog();
+        }}
+      >
+        <DialogPopup className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>New File</DialogTitle>
+            <DialogDescription>
+              {newFileDirectory
+                ? `Create a file in ${newFileDirectory}/.`
+                : `Create a file in the ${projectName} project root.`}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogPanel>
+            <label htmlFor={newFileNameInputId} className="grid gap-1.5">
+              <span className="text-xs font-medium text-foreground">File name</span>
+              <Input
+                id={newFileNameInputId}
+                value={newFileName}
+                onChange={(event) => setNewFileName(event.target.value)}
+                placeholder="example.ts"
+                spellCheck={false}
+                autoFocus
+                disabled={isCreatingFile}
+                onKeyDown={(event) => {
+                  if (event.key !== "Enter") return;
+                  event.preventDefault();
+                  void createNewFile();
+                }}
+              />
+            </label>
+          </DialogPanel>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={closeNewFileDialog}
+              disabled={isCreatingFile}
+            >
+              Cancel
+            </Button>
+            <Button
+              size="sm"
+              onClick={() => void createNewFile()}
+              disabled={isCreatingFile || newFileName.trim().length === 0}
+            >
+              {isCreatingFile ? "Creating…" : "Create"}
+            </Button>
+          </DialogFooter>
+        </DialogPopup>
+      </Dialog>
     </div>
   );
 }

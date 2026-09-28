@@ -1,3 +1,4 @@
+import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import { TrimmedNonEmptyString } from "./baseSchemas.ts";
 
@@ -6,12 +7,21 @@ const FILESYSTEM_PATH_MAX_LENGTH = 512;
 export const FilesystemBrowseInput = Schema.Struct({
   partialPath: TrimmedNonEmptyString.check(Schema.isMaxLength(FILESYSTEM_PATH_MAX_LENGTH)),
   cwd: Schema.optional(TrimmedNonEmptyString.check(Schema.isMaxLength(FILESYSTEM_PATH_MAX_LENGTH))),
+  // When set, matching files are included alongside directories (e.g. `.code-workspace`).
+  includeFileExtensions: Schema.optional(Schema.Array(TrimmedNonEmptyString)),
 });
 export type FilesystemBrowseInput = typeof FilesystemBrowseInput.Type;
+
+export const FilesystemBrowseEntryKind = Schema.Literals(["directory", "file"]);
+export type FilesystemBrowseEntryKind = typeof FilesystemBrowseEntryKind.Type;
 
 export const FilesystemBrowseEntry = Schema.Struct({
   name: TrimmedNonEmptyString,
   fullPath: TrimmedNonEmptyString,
+  // Optional on the wire so older servers that only returned directories still decode.
+  kind: Schema.optional(FilesystemBrowseEntryKind).pipe(
+    Schema.withDecodingDefault(Effect.succeed("directory" as const)),
+  ),
 });
 export type FilesystemBrowseEntry = typeof FilesystemBrowseEntry.Type;
 

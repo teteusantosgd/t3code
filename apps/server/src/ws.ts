@@ -52,6 +52,7 @@ import {
   type ProjectFileOperation,
   ProjectListEntriesError,
   ProjectReadFileError,
+  ProjectResolveCodeWorkspaceError,
   ProjectSearchContentsError,
   ProjectSearchEntriesError,
   ProjectWriteFileError,
@@ -130,6 +131,7 @@ import * as PreviewManager from "./preview/Manager.ts";
 import { issueAssetUrl } from "./assets/AssetAccess.ts";
 import { deletePendingAttachment, issueAttachmentUploadUrl } from "./assets/AttachmentUpload.ts";
 import * as PortScanner from "./preview/PortScanner.ts";
+import * as CodeWorkspaceFile from "./workspace/CodeWorkspaceFile.ts";
 import * as WorkspaceEntries from "./workspace/WorkspaceEntries.ts";
 import * as WorkspaceFileSystem from "./workspace/WorkspaceFileSystem.ts";
 import { readWorkflowScript } from "./orchestration/workflowScriptQuery.ts";
@@ -224,6 +226,17 @@ function projectEntriesFailureContext(error: WorkspaceEntries.WorkspaceEntriesEr
   readonly detail?: string;
 } {
   switch (error._tag) {
+    case "WorkspaceCwdNotAuthorizedError":
+      return {
+        failure: "workspace_cwd_not_authorized",
+        normalizedCwd: error.normalizedCwd,
+      };
+    case "WorkspaceAuthorizedRootsLoadError":
+      return {
+        failure: "directory_list_failed",
+        normalizedCwd: error.cwd,
+        detail: error.message,
+      };
     case "WorkspaceRootNotExistsError":
       return {
         failure: "workspace_root_not_found",
@@ -303,6 +316,10 @@ function projectFileFailureContext(
   readonly operationPath?: string;
 } {
   switch (error._tag) {
+    case "WorkspaceCwdNotAuthorizedError":
+      return { failure: "workspace_cwd_not_authorized", resolvedPath: error.normalizedCwd };
+    case "WorkspaceAuthorizedRootsLoadError":
+      return { failure: "operation_failed", operationPath: error.cwd };
     case "WorkspacePathOutsideRootError":
       return { failure: "workspace_path_outside_root" };
     case "WorkspaceFileSystemOperationError":
@@ -578,6 +595,7 @@ const makeWsRpcLayer = (
       const startup = yield* ServerRuntimeStartup.ServerRuntimeStartup;
       const workspaceEntries = yield* WorkspaceEntries.WorkspaceEntries;
       const workspaceFileSystem = yield* WorkspaceFileSystem.WorkspaceFileSystem;
+      const codeWorkspaceFile = yield* CodeWorkspaceFile.CodeWorkspaceFile;
       const canReplayPersistedRange = Effect.fnUntraced(function* (
         afterSequence: number,
         headSequence: number,
@@ -3123,6 +3141,22 @@ const makeWsRpcLayer = (
                     cwd: input.cwd,
                     relativePath: input.relativePath,
                     ...projectFileFailureContext(cause),
+                    cause,
+                  }),
+              ),
+            ),
+            { "rpc.aggregate": "workspace" },
+          ),
+        [WS_METHODS.projectsResolveCodeWorkspace]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.projectsResolveCodeWorkspace,
+            codeWorkspaceFile.read(input.workspaceFilePath).pipe(
+              Effect.mapError(
+                (cause) =>
+                  new ProjectResolveCodeWorkspaceError({
+                    workspaceFilePath: input.workspaceFilePath,
+                    failure: cause.failure,
+                    message: cause.message,
                     cause,
                   }),
               ),

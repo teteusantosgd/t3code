@@ -6,6 +6,20 @@ include a skill when the task needs more context.
 Messages can contain up to 120,000 characters. Longer drafts stay in the composer
 so you can shorten them or split them into several messages.
 
+## Mermaid diagrams
+
+On web and desktop, a `mermaid` code fence renders as a diagram in the chat
+after the message finishes streaming. Switch between Source and Preview from the
+block toolbar; Copy always uses the original Mermaid source. Invalid diagrams
+stay readable as source. Mobile keeps these blocks as code.
+
+````markdown
+```mermaid
+flowchart LR
+  Draft --> Review --> Merge
+```
+````
+
 Pasting 32 KiB or more of text adds that fragment as a text-file attachment so
 the agent can inspect it without filling the model context. A smaller paste also
 becomes an attachment when inserting it would exceed the message limit. On a

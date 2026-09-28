@@ -17,6 +17,7 @@ export function resolveThreadWorkspaceCwd(input: {
   readonly projects: ReadonlyArray<{
     readonly id: ProjectId;
     readonly workspaceRoot: string;
+    readonly repoRoots?: ReadonlyArray<string>;
   }>;
 }): string | undefined {
   const worktreeCwd = input.thread.worktreePath ?? undefined;
@@ -24,5 +25,11 @@ export function resolveThreadWorkspaceCwd(input: {
     return worktreeCwd;
   }
 
-  return input.projects.find((project) => project.id === input.thread.projectId)?.workspaceRoot;
+  const project = input.projects.find((candidate) => candidate.id === input.thread.projectId);
+  if (!project) {
+    return undefined;
+  }
+  // Code workspaces store the `.code-workspace` anchor separately; agents should
+  // launch in the first repo folder when one is configured.
+  return project.repoRoots?.[0] ?? project.workspaceRoot;
 }

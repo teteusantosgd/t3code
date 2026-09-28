@@ -17,6 +17,8 @@ import {
   getCloneDestinationPath,
   getCloneDirectoryName,
   getDefaultCloneUrl,
+  inferProjectTitleFromCodeWorkspaceFile,
+  isCodeWorkspaceFilePath,
   normalizePastedCloneUrl,
   resolveAddProjectPath,
   sortAddProjectProviderSources,
@@ -274,5 +276,13 @@ describe("add project shared logic", () => {
       createWorkspaceRootIfMissing: true,
       defaultModelSelection: null,
     });
+  });
+
+  it("detects code workspace file paths and titles", () => {
+    expect(isCodeWorkspaceFilePath("/work/monorepo.code-workspace")).toBe(true);
+    expect(isCodeWorkspaceFilePath("/work/monorepo.json")).toBe(false);
+    expect(inferProjectTitleFromCodeWorkspaceFile("/work/monorepo.code-workspace")).toBe(
+      "monorepo",
+    );
   });
 });

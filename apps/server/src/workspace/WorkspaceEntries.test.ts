@@ -13,8 +13,15 @@ import { vi } from "vite-plus/test";
 import * as ServerConfig from "../config.ts";
 import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
 import * as VcsProcess from "../vcs/VcsProcess.ts";
+import * as WorkspaceAuthorizedRoots from "./WorkspaceAuthorizedRoots.ts";
 import * as WorkspaceEntries from "./WorkspaceEntries.ts";
 import * as WorkspacePaths from "./WorkspacePaths.ts";
+
+const workspaceAuthorizedRootsTestLayer = Layer.mock(
+  WorkspaceAuthorizedRoots.WorkspaceAuthorizedRoots,
+)({
+  ensureFilesCwdAuthorized: () => Effect.void,
+});
 
 vi.mock("node:fs/promises", async (importOriginal) => {
   const actual = await importOriginal<typeof import("node:fs/promises")>();
@@ -22,7 +29,12 @@ vi.mock("node:fs/promises", async (importOriginal) => {
 });
 
 const TestLayer = Layer.empty.pipe(
-  Layer.provideMerge(WorkspaceEntries.layer.pipe(Layer.provide(WorkspacePaths.layer))),
+  Layer.provideMerge(
+    WorkspaceEntries.layer.pipe(
+      Layer.provide(workspaceAuthorizedRootsTestLayer),
+      Layer.provide(WorkspacePaths.layer),
+    ),
+  ),
   Layer.provideMerge(WorkspacePaths.layer),
   Layer.provideMerge(VcsProcess.layer),
   Layer.provide(

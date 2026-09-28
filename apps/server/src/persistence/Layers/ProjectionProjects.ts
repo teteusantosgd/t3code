@@ -20,6 +20,7 @@ const ProjectionProjectDbRow = ProjectionProject.mapFields(
     defaultModelSelection: Schema.NullOr(Schema.fromJsonString(ModelSelection)),
     autoPull: Schema.Number,
     projectIcon: Schema.NullOr(Schema.fromJsonString(ProjectIconOverride)),
+    repoRoots: Schema.NullOr(Schema.fromJsonString(Schema.Array(Schema.String))),
     scripts: Schema.fromJsonString(Schema.Array(ProjectScript)),
   }),
 );
@@ -40,6 +41,8 @@ const makeProjectionProjectRepository = Effect.gen(function* () {
           auto_pull,
           favicon_path,
           project_icon_json,
+          workspace_file,
+          repo_roots_json,
           scripts_json,
           created_at,
           updated_at,
@@ -54,6 +57,8 @@ const makeProjectionProjectRepository = Effect.gen(function* () {
           ${row.autoPull ? 1 : 0},
           ${row.faviconPath ?? null},
           ${row.projectIcon ? JSON.stringify(row.projectIcon) : null},
+          ${row.workspaceFile ?? null},
+          ${row.repoRoots && row.repoRoots.length > 0 ? JSON.stringify(row.repoRoots) : null},
           ${JSON.stringify(row.scripts)},
           ${row.createdAt},
           ${row.updatedAt},
@@ -68,6 +73,8 @@ const makeProjectionProjectRepository = Effect.gen(function* () {
           auto_pull = excluded.auto_pull,
           favicon_path = excluded.favicon_path,
           project_icon_json = excluded.project_icon_json,
+          workspace_file = excluded.workspace_file,
+          repo_roots_json = excluded.repo_roots_json,
           scripts_json = excluded.scripts_json,
           created_at = excluded.created_at,
           updated_at = excluded.updated_at,
@@ -89,6 +96,8 @@ const makeProjectionProjectRepository = Effect.gen(function* () {
           auto_pull AS "autoPull",
           favicon_path AS "faviconPath",
           project_icon_json AS "projectIcon",
+          workspace_file AS "workspaceFile",
+          repo_roots_json AS "repoRoots",
           scripts_json AS "scripts",
           created_at AS "createdAt",
           updated_at AS "updatedAt",
@@ -98,6 +107,40 @@ const makeProjectionProjectRepository = Effect.gen(function* () {
       `,
   });
 
+  const listActiveProjectionProjectRows = SqlSchema.findAll({
+    Request: Schema.Void,
+    Result: ProjectionProjectDbRow,
+    execute: () =>
+      sql`
+        SELECT
+          project_id AS "projectId",
+          title,
+          workspace_root AS "workspaceRoot",
+          default_model_selection_json AS "defaultModelSelection",
+          default_thread_env_mode AS "defaultThreadEnvMode",
+          auto_pull AS "autoPull",
+          favicon_path AS "faviconPath",
+          project_icon_json AS "projectIcon",
+          workspace_file AS "workspaceFile",
+          repo_roots_json AS "repoRoots",
+          scripts_json AS "scripts",
+          created_at AS "createdAt",
+          updated_at AS "updatedAt",
+          deleted_at AS "deletedAt"
+        FROM projection_projects
+        WHERE deleted_at IS NULL
+      `,
+  });
+
+  const mapProjectionProjectRow = (
+    row: Schema.Schema.Type<typeof ProjectionProjectDbRow>,
+  ): ProjectionProject => ({
+    ...row,
+    autoPull: row.autoPull === 1,
+    workspaceFile: row.workspaceFile ?? null,
+    repoRoots: row.repoRoots ?? [],
+  });
+
   const upsert: ProjectionProjectRepositoryShape["upsert"] = (row) =>
     upsertProjectionProjectRow(row).pipe(
       Effect.mapError(toPersistenceSqlError("ProjectionProjectRepository.upsert:query")),
@@ -105,13 +148,20 @@ const makeProjectionProjectRepository = Effect.gen(function* () {
 
   const getById: ProjectionProjectRepositoryShape["getById"] = (input) =>
     getProjectionProjectRow(input).pipe(
-      Effect.map(Option.map((row) => ({ ...row, autoPull: row.autoPull === 1 }))),
+      Effect.map(Option.map(mapProjectionProjectRow)),
       Effect.mapError(toPersistenceSqlError("ProjectionProjectRepository.getById:query")),
+    );
+
+  const listActive: ProjectionProjectRepositoryShape["listActive"] = () =>
+    listActiveProjectionProjectRows(undefined).pipe(
+      Effect.map((rows) => rows.map(mapProjectionProjectRow)),
+      Effect.mapError(toPersistenceSqlError("ProjectionProjectRepository.listActive:query")),
     );
 
   return {
     upsert,
     getById,
+    listActive,
   } satisfies ProjectionProjectRepositoryShape;
 });
 

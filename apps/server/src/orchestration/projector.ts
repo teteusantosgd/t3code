@@ -346,6 +346,8 @@ export function projectEvent(
             autoPull: false,
             faviconPath: payload.faviconPath ?? null,
             projectIcon: payload.projectIcon ?? null,
+            workspaceFile: payload.workspaceFile ?? null,
+            repoRoots: payload.repoRoots ?? [],
             scripts: payload.scripts,
             createdAt: payload.createdAt,
             updatedAt: payload.updatedAt,
@@ -388,6 +390,10 @@ export function projectEvent(
                   ...(payload.projectIcon !== undefined
                     ? { projectIcon: payload.projectIcon }
                     : {}),
+                  ...(payload.workspaceFile !== undefined
+                    ? { workspaceFile: payload.workspaceFile }
+                    : {}),
+                  ...(payload.repoRoots !== undefined ? { repoRoots: payload.repoRoots } : {}),
                   ...(payload.scripts !== undefined ? { scripts: payload.scripts } : {}),
                   updatedAt: payload.updatedAt,
                 }

@@ -21,6 +21,7 @@ import {
 } from "../attachmentStore.ts";
 import { ServerConfig } from "../config.ts";
 import { parseBase64DataUrl } from "../imageMime.ts";
+import * as CodeWorkspaceFile from "../workspace/CodeWorkspaceFile.ts";
 import * as WorkspacePaths from "../workspace/WorkspacePaths.ts";
 
 export const canonicalizeClientCommandTimestamps = (
@@ -110,25 +111,76 @@ export const normalizeDispatchCommand = (command: ClientOrchestrationCommand) =>
           ),
         );
 
+    const resolveCodeWorkspace = (workspaceFilePath: string) =>
+      Effect.gen(function* () {
+        const codeWorkspaceFile = yield* CodeWorkspaceFile.CodeWorkspaceFile;
+        return yield* codeWorkspaceFile.read(workspaceFilePath).pipe(
+          Effect.mapError(
+            (cause) =>
+              new OrchestrationDispatchCommandError({
+                message: cause.message,
+              }),
+          ),
+        );
+      });
+
     if (canonicalCommand.type === "project.create") {
+      if (canonicalCommand.workspaceFile) {
+        const resolved = yield* resolveCodeWorkspace(canonicalCommand.workspaceFile);
+        return {
+          ...canonicalCommand,
+          workspaceRoot: yield* normalizeProjectWorkspaceRootForCreate(
+            resolved.anchorDir,
+            canonicalCommand.createWorkspaceRootIfMissing,
+          ),
+          workspaceFile: resolved.workspaceFilePath,
+          repoRoots: [...resolved.repoRoots],
+          createWorkspaceRootIfMissing: canonicalCommand.createWorkspaceRootIfMissing === true,
+        } satisfies OrchestrationCommand;
+      }
+
       return {
         ...canonicalCommand,
         workspaceRoot: yield* normalizeProjectWorkspaceRootForCreate(
           canonicalCommand.workspaceRoot,
           canonicalCommand.createWorkspaceRootIfMissing,
         ),
+        workspaceFile: null,
+        repoRoots: [],
         createWorkspaceRootIfMissing: canonicalCommand.createWorkspaceRootIfMissing === true,
       } satisfies OrchestrationCommand;
     }
 
-    if (
-      canonicalCommand.type === "project.meta.update" &&
-      canonicalCommand.workspaceRoot !== undefined
-    ) {
-      return {
-        ...canonicalCommand,
-        workspaceRoot: yield* normalizeProjectWorkspaceRoot(canonicalCommand.workspaceRoot),
-      } satisfies OrchestrationCommand;
+    if (canonicalCommand.type === "project.meta.update") {
+      if (canonicalCommand.workspaceFile === null) {
+        return {
+          ...canonicalCommand,
+          ...(canonicalCommand.workspaceRoot !== undefined
+            ? {
+                workspaceRoot: yield* normalizeProjectWorkspaceRoot(canonicalCommand.workspaceRoot),
+              }
+            : {}),
+          workspaceFile: null,
+          repoRoots: [],
+        } satisfies OrchestrationCommand;
+      }
+
+      if (canonicalCommand.workspaceFile !== undefined) {
+        const resolved = yield* resolveCodeWorkspace(canonicalCommand.workspaceFile);
+        return {
+          ...canonicalCommand,
+          workspaceRoot: yield* normalizeProjectWorkspaceRoot(resolved.anchorDir),
+          workspaceFile: resolved.workspaceFilePath,
+          repoRoots: [...resolved.repoRoots],
+        } satisfies OrchestrationCommand;
+      }
+
+      if (canonicalCommand.workspaceRoot !== undefined) {
+        return {
+          ...canonicalCommand,
+          workspaceRoot: yield* normalizeProjectWorkspaceRoot(canonicalCommand.workspaceRoot),
+        } satisfies OrchestrationCommand;
+      }
     }
 
     if (

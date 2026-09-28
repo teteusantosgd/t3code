@@ -567,6 +567,10 @@ export function useSettingsRestore(onRestored?: () => void) {
       ...(settings.diffFilesCollapsed !== DEFAULT_UNIFIED_SETTINGS.diffFilesCollapsed
         ? ["Default diff file state"]
         : []),
+      ...(settings.showProviderInstanceBadges !==
+      DEFAULT_UNIFIED_SETTINGS.showProviderInstanceBadges
+        ? ["Provider account badges"]
+        : []),
       ...(settings.diffIgnoreWhitespace !== DEFAULT_UNIFIED_SETTINGS.diffIgnoreWhitespace
         ? ["Diff whitespace changes"]
         : []),
@@ -658,6 +662,7 @@ export function useSettingsRestore(onRestored?: () => void) {
       settings.defaultThreadEnvMode,
       settings.newWorktreesStartFromOrigin,
       settings.diffFilesCollapsed,
+      settings.showProviderInstanceBadges,
       settings.diffIgnoreWhitespace,
       settings.diffLayout,
       settings.proactivePanelsEnabled,
@@ -761,6 +766,7 @@ export function useSettingsRestore(onRestored?: () => void) {
       inAppNotificationsEnabled: DEFAULT_UNIFIED_SETTINGS.inAppNotificationsEnabled,
       wordWrap: DEFAULT_UNIFIED_SETTINGS.wordWrap,
       diffFilesCollapsed: DEFAULT_UNIFIED_SETTINGS.diffFilesCollapsed,
+      showProviderInstanceBadges: DEFAULT_UNIFIED_SETTINGS.showProviderInstanceBadges,
       diffIgnoreWhitespace: DEFAULT_UNIFIED_SETTINGS.diffIgnoreWhitespace,
       diffLayout: DEFAULT_UNIFIED_SETTINGS.diffLayout,
       proactivePanelsEnabled: DEFAULT_UNIFIED_SETTINGS.proactivePanelsEnabled,
@@ -1388,6 +1394,7 @@ export function AppearanceSettingsPanel() {
             </div>
           }
         />
+        <ProviderInstanceBadgesRow />
       </SettingsSection>
 
       <SettingsSection id="motion" title="Motion">
@@ -1662,6 +1669,39 @@ function WordWrapRow() {
           checked={settings.wordWrap}
           onCheckedChange={(checked) => updateSettings({ wordWrap: Boolean(checked) })}
           aria-label="Wrap code, tables, diffs, and file previews by default"
+        />
+      }
+    />
+  );
+}
+
+function ProviderInstanceBadgesRow() {
+  const settings = useScopedSettings();
+  const updateSettings = useUpdateScopedSettings();
+  return (
+    <SettingsRow
+      {...searchableSetting("provider-instance-badges")}
+      description="Show account initials on provider icons when multiple accounts share a provider."
+      resetAction={
+        settings.showProviderInstanceBadges !==
+        DEFAULT_UNIFIED_SETTINGS.showProviderInstanceBadges ? (
+          <SettingResetButton
+            label="provider account badges"
+            onClick={() =>
+              updateSettings({
+                showProviderInstanceBadges: DEFAULT_UNIFIED_SETTINGS.showProviderInstanceBadges,
+              })
+            }
+          />
+        ) : null
+      }
+      control={
+        <Switch
+          checked={settings.showProviderInstanceBadges}
+          onCheckedChange={(checked) =>
+            updateSettings({ showProviderInstanceBadges: Boolean(checked) })
+          }
+          aria-label="Provider account badges"
         />
       }
     />

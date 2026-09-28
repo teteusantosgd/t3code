@@ -83,6 +83,12 @@ export interface ProjectionThreadRepositoryShape {
   readonly getById: (
     input: GetProjectionThreadInput,
   ) => Effect.Effect<Option.Option<ProjectionThread>, ProjectionRepositoryError>;
+
+  /** Distinct non-null worktree paths on active (non-deleted) threads. */
+  readonly listActiveWorktreePaths: () => Effect.Effect<
+    ReadonlyArray<string>,
+    ProjectionRepositoryError
+  >;
 }
 
 /**

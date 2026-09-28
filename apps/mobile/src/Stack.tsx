@@ -53,6 +53,7 @@ import { ConnectionsNewRouteScreen } from "./features/connection/ConnectionsNewR
 import { HomeRouteScreen } from "./features/home/HomeRouteScreen";
 import { AddProjectDestinationRoute } from "./features/projects/AddProjectDestinationRoute";
 import { AddProjectLocalRoute } from "./features/projects/AddProjectLocalRoute";
+import { AddProjectWorkspaceRoute } from "./features/projects/AddProjectWorkspaceRoute";
 import { AddProjectRepositoryRoute } from "./features/projects/AddProjectRepositoryRoute";
 import { AddProjectSourceRoute } from "./features/projects/AddProjectSourceRoute";
 import { NewTaskDraftRouteScreen } from "./features/threads/NewTaskDraftRouteScreen";
@@ -457,7 +458,10 @@ const NewTaskSheetStack = createNativeStackNavigator({
     }),
     AddProjectLocal: createNativeStackScreen({
       screen: AddProjectLocalRoute,
-      linking: "add-project/local",
+    }),
+    AddProjectWorkspace: createNativeStackScreen({
+      screen: AddProjectWorkspaceRoute,
+      linking: "add-project/workspace",
     }),
   },
 });

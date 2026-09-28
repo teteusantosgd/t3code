@@ -1298,6 +1298,57 @@ it.layer(TestLayer)("GitVcsDriver core integration", (it) => {
       }),
     );
 
+    it.effect("separates staged, unstaged, and uncommitted review sources", () =>
+      Effect.gen(function* () {
+        const cwd = yield* makeTmpDir();
+        yield* initRepoWithCommit(cwd);
+        const driver = yield* GitVcsDriver.GitVcsDriver;
+        yield* writeTextFile(cwd, "tracked.ts", "committed\n");
+        yield* git(cwd, ["add", "tracked.ts"]);
+        yield* git(cwd, ["commit", "-m", "track file"]);
+        yield* writeTextFile(cwd, "tracked.ts", "staged\n");
+        yield* git(cwd, ["add", "tracked.ts"]);
+        yield* writeTextFile(cwd, "tracked.ts", "unstaged\n");
+        yield* writeTextFile(cwd, "untracked.ts", "new\n");
+
+        const preview = yield* driver.getReviewDiffPreview({ cwd });
+        const staged = preview.sources.find((source) => source.kind === "staged")!;
+        const unstaged = preview.sources.find((source) => source.kind === "unstaged")!;
+        const workingTree = preview.sources.find((source) => source.kind === "working-tree")!;
+
+        assert.include(staged.diff, "+staged");
+        assert.notInclude(staged.diff, "untracked.ts");
+        assert.include(unstaged.diff, "+unstaged");
+        assert.include(unstaged.diff, "+++ b/untracked.ts");
+        assert.include(workingTree.diff, "+unstaged");
+        assert.include(workingTree.diff, "+++ b/untracked.ts");
+
+        const stagedContents = yield* driver.getReviewDiffFileContents({
+          cwd,
+          sourceKind: "staged",
+          changeType: "change",
+          baseRef: "HEAD",
+          headRef: null,
+          oldPath: "tracked.ts",
+          newPath: "tracked.ts",
+        });
+        assert.equal(stagedContents.oldContents, "committed\n");
+        assert.equal(stagedContents.newContents, "staged\n");
+
+        const unstagedContents = yield* driver.getReviewDiffFileContents({
+          cwd,
+          sourceKind: "unstaged",
+          changeType: "change",
+          baseRef: null,
+          headRef: null,
+          oldPath: "tracked.ts",
+          newPath: "tracked.ts",
+        });
+        assert.equal(unstagedContents.oldContents, "staged\n");
+        assert.equal(unstagedContents.newContents, "unstaged\n");
+      }),
+    );
+
     it.effect("keeps untracked filenames with pathspec magic in the review", () =>
       Effect.gen(function* () {
         const cwd = yield* makeTmpDir();
