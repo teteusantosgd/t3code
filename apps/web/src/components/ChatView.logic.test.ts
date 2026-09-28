@@ -1644,6 +1644,8 @@ describe("isDiffSurfaceAvailable", () => {
   });
 
   it("allows Diff for configured nested repositories even when the root is not git", () => {
+    // Includes t3.json repositories and multi-root project.repoRoots (OR'd at
+    // the ChatView call site when the workspace folder itself is not git).
     expect(
       isDiffSurfaceAvailable({
         isServerThread: true,

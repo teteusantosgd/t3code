@@ -3779,7 +3779,11 @@ export default function ChatView(props: ChatViewProps) {
     activeThread?.environmentId ?? null,
     activeThreadWorktreePath == null ? activeProjectCwd : null,
   );
-  const hasConfiguredRepositories = (projectFileState.file?.repositories?.paths?.length ?? 0) > 0;
+  // t3.json repositories and VS Code workspace repoRoots both unlock Diff when
+  // the project workspace root itself is not a git checkout (multi-root).
+  const hasConfiguredRepositories =
+    (projectFileState.file?.repositories?.paths?.length ?? 0) > 0 ||
+    (activeProject?.repoRoots?.length ?? 0) > 0;
   const diffSurfaceAvailable = isDiffSurfaceAvailable({
     isServerThread,
     isGitRepo,
