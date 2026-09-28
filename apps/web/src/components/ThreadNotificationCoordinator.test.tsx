@@ -239,6 +239,24 @@ describe("thread notifications", () => {
     expect(state.notification).not.toHaveBeenCalled();
   });
 
+  it("skips sound for the thread the user is viewing", async () => {
+    state.mode = "sound";
+    state.active.threadId = "thread-1";
+    await render();
+    await complete();
+    expect(state.sound).not.toHaveBeenCalled();
+    expect(state.add).not.toHaveBeenCalled();
+  });
+
+  it("still plays sound for the selected thread when the app is in the background", async () => {
+    state.mode = "sound";
+    state.active.threadId = "thread-1";
+    state.focused = false;
+    await render();
+    await complete();
+    expect(state.sound).toHaveBeenCalledWith("completion", expect.any(Function));
+  });
+
   it("keeps system alerts when the app is in the background", async () => {
     state.mode = "notifications";
     state.focused = false;

@@ -145,17 +145,17 @@ function EnvironmentNotifications({
             : status === "failed"
               ? "Thread failed"
               : "Input needed";
-      if (hasNotificationSound(mode)) {
+      const appFocused = document.visibilityState === "visible" && document.hasFocus();
+      const viewingThisThread =
+        appFocused && activeEnvironmentId === environmentId && activeThreadId === thread.id;
+      // Skip sound while the user is already looking at this thread; still play
+      // when the window is in the background.
+      if (hasNotificationSound(mode) && !viewingThisThread) {
         void playNotificationSound(kind, () =>
           hasNotificationSound(getClientSettings().notificationMode),
         );
       }
-      if (
-        inAppNotificationsEnabled &&
-        document.visibilityState === "visible" &&
-        document.hasFocus() &&
-        (activeEnvironmentId !== environmentId || activeThreadId !== thread.id)
-      ) {
+      if (inAppNotificationsEnabled && appFocused && !viewingThisThread) {
         const toastId = toastManager.add({
           type: kind === "completion" ? "success" : status === "failed" ? "error" : "warning",
           title,
