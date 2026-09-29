@@ -234,6 +234,7 @@ import {
 } from "./ui/combobox";
 import { SidebarContent, SidebarGroup, useSidebar } from "./ui/sidebar";
 import { SidebarChromeFooter, SidebarChromeHeader } from "./sidebar/SidebarChrome";
+import { SidebarUsageLimitsPreview } from "./sidebar/SidebarUsageLimitsPreview";
 import { SidebarHeaderIconButton, SidebarThreadHeader } from "./sidebar/SidebarThreadHeader";
 import { Menu, MenuItem, MenuPopup, MenuSeparator, MenuShortcut, MenuTrigger } from "./ui/menu";
 import { Tooltip, TooltipPopup, TooltipProvider, TooltipTrigger } from "./ui/tooltip";
@@ -4809,10 +4810,24 @@ export default function Sidebar() {
                           onNavigateToDraft={navigateToDraft}
                         />,
                       ];
+                      let usagePreviewInserted = false;
+                      const insertUsagePreview = () => {
+                        if (usagePreviewInserted) return;
+                        usagePreviewInserted = true;
+                        items.push(
+                          <SidebarUsageLimitsPreview
+                            key="usage-limits-preview"
+                            className="mt-auto"
+                          />,
+                        );
+                      };
                       for (const item of sidebarListItems) {
                         if (item.kind === "thread") {
                           items.push(renderThreadRow(threadByKey.get(item.key)!, item.section));
                           continue;
+                        }
+                        if (item.marker === "snoozed-header" || item.marker === "settled-header") {
+                          insertUsagePreview();
                         }
                         switch (item.marker) {
                           case "pinned-header":
@@ -4860,7 +4875,6 @@ export default function Sidebar() {
                               <SidebarSectionHeader
                                 key="snoozed-shelf-header"
                                 marker="snoozed-header"
-                                className="mt-auto"
                                 label={
                                   snoozedShelfExpanded
                                     ? "Snoozed"
@@ -4878,7 +4892,6 @@ export default function Sidebar() {
                               <SidebarSectionHeader
                                 key="settled-shelf-header"
                                 marker="settled-header"
-                                className={cn(snoozedThreads.length === 0 && "mt-auto")}
                                 label={
                                   settledShelfExpanded
                                     ? "Settled"
@@ -4913,6 +4926,7 @@ export default function Sidebar() {
                             break;
                         }
                       }
+                      insertUsagePreview();
                       return items;
                     })()}
                     {settledShelfExpanded && hiddenSettledCount > 0 ? (
