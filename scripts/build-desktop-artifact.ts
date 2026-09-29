@@ -3308,10 +3308,22 @@ export const validateWindowsPackagedPayload = Effect.fn(
     verbose: input.verbose ?? false,
   });
 
-  yield* verifyPackagedBundleIsSelfContained({
-    asarPath,
-    verbose: input.verbose ?? false,
-  });
+  // The sidecar self-check loads the packaged tree with the host Node runtime.
+  // Cross-builds (macOS/Linux packaging win32) ship win32 optional natives, so
+  // host Node resolves the wrong @yuuang/ffi-rs-* binding and fails spuriously.
+  // Static unpacked-native checks above still run; the live probe stays Windows-only,
+  // matching verifyWindowsPrimaryFffNativeLoad.
+  const hostPlatform = yield* HostProcessPlatform;
+  if (hostPlatform === "win32") {
+    yield* verifyPackagedBundleIsSelfContained({
+      asarPath,
+      verbose: input.verbose ?? false,
+    });
+  } else {
+    yield* Effect.log(
+      `[desktop-artifact] Skipping sidecar Node self-check on ${hostPlatform} (win32 natives only load on Windows).`,
+    );
+  }
 
   yield* Effect.log(
     `[desktop-artifact] Validated Windows payload (${String(fileCount)} files, ${String(unpackedFiles.length)} sidecar natives).`,
