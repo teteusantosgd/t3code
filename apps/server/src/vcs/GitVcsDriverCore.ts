@@ -26,6 +26,8 @@ import {
   type ReviewDiffFileStat,
   type ReviewDiffPreviewSource,
   type ReviewDiffPreviewSourceKind,
+  type VcsChangedFileGroup,
+  type VcsFileChangeStatus,
   type VcsRef,
 } from "@t3tools/contracts";
 import { dedupeRemoteBranchesWithLocalMatches, normalizeGitRemoteUrl } from "@t3tools/shared/git";
@@ -88,6 +90,9 @@ const STATUS_UPSTREAM_REFRESH_ENV = Object.freeze({
 } satisfies NodeJS.ProcessEnv);
 const DEFAULT_BASE_BRANCH_CANDIDATES = ["main", "master"] as const;
 const GIT_LIST_BRANCHES_DEFAULT_LIMIT = 100;
+// The stash list rides along on every stash mutation response; bound it so a
+// repository with a runaway stash cannot bloat the websocket frame.
+const STASH_LIST_MAX_ENTRIES = 100;
 const NON_REPOSITORY_STATUS_DETAILS = Object.freeze<GitVcsDriver.GitStatusDetails>({
   isRepo: false,
   hasOriginRemote: false,
@@ -96,6 +101,8 @@ const NON_REPOSITORY_STATUS_DETAILS = Object.freeze<GitVcsDriver.GitStatusDetail
   upstreamRef: null,
   hasWorkingTreeChanges: false,
   workingTree: { files: [], insertions: 0, deletions: 0 },
+  staged: { files: [], insertions: 0, deletions: 0 },
+  unstaged: { files: [], insertions: 0, deletions: 0 },
   hasUpstream: false,
   aheadCount: 0,
   behindCount: 0,
@@ -236,6 +243,91 @@ function parsePorcelainPath(line: string): string | null {
   const parts = line.trim().split(/\s+/g);
   const filePath = parts.at(-1) ?? "";
   return filePath.length > 0 ? filePath : null;
+}
+
+/**
+ * Field count that precedes the path on each `--porcelain=2` record kind, so a
+ * path containing spaces survives. Untracked (`?`) and ignored (`!`) records
+ * carry a single leading field and are handled separately.
+ */
+const PORCELAIN_V2_PATH_FIELD_OFFSETS = { "1": 8, "2": 9, u: 10 } as const;
+
+function porcelainV2ChangeStatus(letter: string | undefined): VcsFileChangeStatus | null {
+  switch (letter) {
+    case "M":
+    case "T":
+    case "C":
+      return "M";
+    case "A":
+      return "A";
+    case "D":
+      return "D";
+    case "R":
+      return "R";
+    case "U":
+      return "U";
+    default:
+      // "." and anything git adds later mean "nothing changed on this side".
+      return null;
+  }
+}
+
+function parsePorcelainV2EntryPath(line: string, fieldOffset: number): string | null {
+  let index = 0;
+  for (let field = 0; field < fieldOffset; field += 1) {
+    const separator = line.indexOf(" ", index);
+    if (separator < 0) return null;
+    index = separator + 1;
+  }
+  // A rename record appends the original path after a tab.
+  const rest = line.slice(index);
+  const tabIndex = rest.indexOf("\t");
+  const filePath = (tabIndex >= 0 ? rest.slice(0, tabIndex) : rest).trim();
+  return filePath.length > 0 ? filePath : null;
+}
+
+export interface PorcelainV2Change {
+  readonly path: string;
+  readonly status: VcsFileChangeStatus;
+}
+
+/**
+ * Splits `git status --porcelain=2` output into the index side and the
+ * worktree side. A path dirty on both sides appears in both lists.
+ */
+export function parsePorcelainV2Changes(stdout: string): {
+  staged: Array<PorcelainV2Change>;
+  unstaged: Array<PorcelainV2Change>;
+} {
+  const staged: Array<PorcelainV2Change> = [];
+  const unstaged: Array<PorcelainV2Change> = [];
+
+  for (const line of stdout.split(/\r?\n/g)) {
+    if (line.startsWith("? ")) {
+      const filePath = line.slice(2).trim();
+      if (filePath.length > 0) unstaged.push({ path: filePath, status: "?" });
+      continue;
+    }
+    const kind = line[0];
+    if (kind !== "1" && kind !== "2" && kind !== "u") continue;
+
+    const filePath = parsePorcelainV2EntryPath(line, PORCELAIN_V2_PATH_FIELD_OFFSETS[kind]);
+    if (filePath === null) continue;
+    if (kind === "u") {
+      unstaged.push({ path: filePath, status: "U" });
+      continue;
+    }
+
+    // Rename records only ever carry R or C on the index side, and a copy
+    // recorded here is still a new path pointing at old content.
+    const indexStatus =
+      kind === "2" ? (line[2] === "." ? null : ("R" as const)) : porcelainV2ChangeStatus(line[2]);
+    if (indexStatus !== null) staged.push({ path: filePath, status: indexStatus });
+    const worktreeStatus = porcelainV2ChangeStatus(line[3]);
+    if (worktreeStatus !== null) unstaged.push({ path: filePath, status: worktreeStatus });
+  }
+
+  return { staged, unstaged };
 }
 
 function filterBranchesForListQuery(
@@ -1913,6 +2005,30 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
     }
     files.sort((a, b) => a.path.localeCompare(b.path));
 
+    // Both sides reuse the combined-vs-HEAD numstat, so a path dirty in the
+    // index and the worktree reports the same totals twice. Splitting them
+    // would cost two more diffs per status poll for a number the Source
+    // Control list only shows per file.
+    const toChangedFileGroup = (changes: ReadonlyArray<PorcelainV2Change>): VcsChangedFileGroup => {
+      let groupInsertions = 0;
+      let groupDeletions = 0;
+      const groupFiles = changes
+        .map((change) => {
+          const stat = fileStatMap.get(change.path) ?? { insertions: 0, deletions: 0 };
+          groupInsertions += stat.insertions;
+          groupDeletions += stat.deletions;
+          return {
+            path: change.path,
+            status: change.status,
+            insertions: stat.insertions,
+            deletions: stat.deletions,
+          };
+        })
+        .toSorted((a, b) => a.path.localeCompare(b.path));
+      return { files: groupFiles, insertions: groupInsertions, deletions: groupDeletions };
+    };
+    const changes = parsePorcelainV2Changes(statusStdout);
+
     return {
       isRepo: true,
       hasOriginRemote: hasPrimaryRemote,
@@ -1925,6 +2041,8 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
         insertions,
         deletions,
       },
+      staged: toChangedFileGroup(changes.staged),
+      unstaged: toChangedFileGroup(changes.unstaged),
       hasUpstream: upstreamRef !== null,
       aheadCount,
       behindCount,
@@ -1974,6 +2092,8 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
         refName: details.branch,
         hasWorkingTreeChanges: details.hasWorkingTreeChanges,
         workingTree: details.workingTree,
+        staged: details.staged,
+        unstaged: details.unstaged,
         hasUpstream: details.hasUpstream,
         aheadCount: details.aheadCount,
         behindCount: details.behindCount,
@@ -2281,6 +2401,209 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
       refName,
       upstreamRef: refreshed.upstreamRef,
     };
+  });
+
+  const hasHeadCommit = (cwd: string) =>
+    executeGit("GitVcsDriver.hasHeadCommit", cwd, ["rev-parse", "--verify", "--quiet", "HEAD"], {
+      allowNonZeroExit: true,
+    }).pipe(Effect.map((result) => result.exitCode === 0));
+
+  const stagePaths: GitVcsDriver.GitVcsDriver["Service"]["stagePaths"] = (cwd, paths) =>
+    runGit("GitVcsDriver.stagePaths", cwd, ["--literal-pathspecs", "add", "-A", "--", ...paths]);
+
+  const unstagePaths: GitVcsDriver.GitVcsDriver["Service"]["unstagePaths"] = Effect.fn(
+    "unstagePaths",
+  )(function* (cwd, paths) {
+    // Before the first commit there is nothing to restore the index from, so
+    // unstaging means dropping the entry altogether.
+    if (!(yield* hasHeadCommit(cwd))) {
+      yield* runGit("GitVcsDriver.unstagePaths.unborn", cwd, [
+        "--literal-pathspecs",
+        "rm",
+        "--cached",
+        "-r",
+        "--",
+        ...paths,
+      ]);
+      return;
+    }
+    yield* runGit("GitVcsDriver.unstagePaths", cwd, [
+      "--literal-pathspecs",
+      "restore",
+      "--staged",
+      "--",
+      ...paths,
+    ]);
+  });
+
+  const discardPaths: GitVcsDriver.GitVcsDriver["Service"]["discardPaths"] = Effect.fn(
+    "discardPaths",
+  )(function* (cwd, paths) {
+    const untracked = splitNullSeparatedGitStdoutPaths(
+      yield* executeGit("GitVcsDriver.discardPaths.untracked", cwd, [
+        "--literal-pathspecs",
+        "ls-files",
+        "--others",
+        "--exclude-standard",
+        "-z",
+        "--",
+        ...paths,
+      ]),
+    );
+    const tracked = splitNullSeparatedGitStdoutPaths(
+      yield* executeGit("GitVcsDriver.discardPaths.tracked", cwd, [
+        "--literal-pathspecs",
+        "ls-files",
+        "--cached",
+        "-z",
+        "--",
+        ...paths,
+      ]),
+    );
+
+    yield* Effect.forEach(
+      untracked,
+      (relativePath) =>
+        fileSystem.remove(path.resolve(cwd, relativePath), { force: true }).pipe(
+          Effect.mapError(
+            (cause) =>
+              new GitCommandError({
+                ...gitCommandContext({
+                  operation: "GitVcsDriver.discardPaths.removeUntracked",
+                  cwd,
+                  args: paths,
+                }),
+                detail: "Failed to delete an untracked file while discarding changes.",
+                cause,
+              }),
+          ),
+        ),
+      { discard: true },
+    );
+
+    if (tracked.length === 0) return;
+    // Restore from the index rather than HEAD so staged work survives, and
+    // feed the resolved paths through stdin so a large directory selection
+    // cannot overflow the argument list.
+    yield* runGit(
+      "GitVcsDriver.discardPaths",
+      cwd,
+      [
+        "--literal-pathspecs",
+        "restore",
+        "--worktree",
+        "--pathspec-file-nul",
+        "--pathspec-from-file=-",
+      ],
+      { stdin: `${tracked.join("\0")}\0` },
+    );
+  });
+
+  // Hunks arrive as the unified diff the client already rendered, so git
+  // derives the target path from the patch header. --unidiff-zero keeps
+  // zero-context hunks (a pure insertion at a file boundary) applicable.
+  const applyHunk = (operation: string, cwd: string, patch: string, args: ReadonlyArray<string>) =>
+    runGit(operation, cwd, ["apply", "--unidiff-zero", ...args, "-"], {
+      stdin: patch.endsWith("\n") ? patch : `${patch}\n`,
+    });
+
+  const stageHunk: GitVcsDriver.GitVcsDriver["Service"]["stageHunk"] = (cwd, patch) =>
+    applyHunk("GitVcsDriver.stageHunk", cwd, patch, ["--cached"]);
+
+  const unstageHunk: GitVcsDriver.GitVcsDriver["Service"]["unstageHunk"] = (cwd, patch) =>
+    applyHunk("GitVcsDriver.unstageHunk", cwd, patch, ["--cached", "--reverse"]);
+
+  const discardHunk: GitVcsDriver.GitVcsDriver["Service"]["discardHunk"] = (cwd, patch) =>
+    applyHunk("GitVcsDriver.discardHunk", cwd, patch, ["--reverse"]);
+
+  const listStashEntries = (cwd: string) =>
+    runGitStdout("GitVcsDriver.stash.list", cwd, [
+      "stash",
+      "list",
+      "-z",
+      "--format=%gd%x1f%gs",
+    ]).pipe(
+      Effect.map((stdout) =>
+        stdout
+          .split("\0")
+          .flatMap((record) => {
+            const separatorIndex = record.indexOf("\x1f");
+            if (separatorIndex < 0) return [];
+            const ref = record.slice(0, separatorIndex).trim();
+            const message = record.slice(separatorIndex + 1).trim();
+            return ref.length > 0 && message.length > 0 ? [{ ref, message }] : [];
+          })
+          .slice(0, STASH_LIST_MAX_ENTRIES),
+      ),
+    );
+
+  const stash: GitVcsDriver.GitVcsDriver["Service"]["stash"] = Effect.fn("stash")(
+    function* (input) {
+      const { cwd, action } = input;
+      if (action === "push") {
+        yield* runGit("GitVcsDriver.stash.push", cwd, [
+          "stash",
+          "push",
+          ...(input.includeUntracked === true ? ["--include-untracked"] : []),
+          ...(input.message === undefined ? [] : ["--message", input.message]),
+        ]);
+      } else if (action !== "list") {
+        yield* runGit("GitVcsDriver.stash." + action, cwd, [
+          "stash",
+          action,
+          ...(input.stashRef === undefined ? [] : [input.stashRef]),
+        ]);
+      }
+      return { action, entries: yield* listStashEntries(cwd) };
+    },
+  );
+
+  const readHeadCommit = Effect.fn("readHeadCommit")(function* (cwd: string) {
+    const [commitSha, subject] = yield* Effect.all([
+      runGitStdout("GitVcsDriver.readHeadCommit.sha", cwd, ["rev-parse", "HEAD"]),
+      runGitStdout("GitVcsDriver.readHeadCommit.subject", cwd, ["log", "-1", "--format=%s"]),
+    ]);
+    return { commitSha: commitSha.trim(), subject: subject.trim() };
+  });
+
+  const amendCommit: GitVcsDriver.GitVcsDriver["Service"]["amendCommit"] = Effect.fn("amendCommit")(
+    function* (cwd, commitMessage) {
+      yield* runGit("GitVcsDriver.amendCommit", cwd, [
+        "commit",
+        "--amend",
+        ...(commitMessage === undefined ? ["--no-edit"] : ["--message", commitMessage]),
+      ]);
+      const { commitSha, subject } = yield* readHeadCommit(cwd);
+      return {
+        commitSha,
+        // An amended commit always has a subject, but never hand the contract an
+        // empty string if git surprises us.
+        subject: subject.length > 0 ? subject : commitSha,
+      };
+    },
+  );
+
+  const undoLastCommit: GitVcsDriver.GitVcsDriver["Service"]["undoLastCommit"] = Effect.fn(
+    "undoLastCommit",
+  )(function* (cwd) {
+    const previousCommitSha = (yield* runGitStdout("GitVcsDriver.undoLastCommit.head", cwd, [
+      "rev-parse",
+      "HEAD",
+    ])).trim();
+    const hasParent = yield* executeGit(
+      "GitVcsDriver.undoLastCommit.parent",
+      cwd,
+      ["rev-parse", "--verify", "--quiet", "HEAD~1"],
+      { allowNonZeroExit: true },
+    ).pipe(Effect.map((result) => result.exitCode === 0));
+    // Undoing a root commit leaves an unborn branch; a soft reset has no
+    // target to move to, so drop the ref and keep the index as it is.
+    yield* runGit(
+      "GitVcsDriver.undoLastCommit",
+      cwd,
+      hasParent ? ["reset", "--soft", "HEAD~1"] : ["update-ref", "-d", "HEAD"],
+    );
+    return { previousCommitSha };
   });
 
   const readRangeContext: GitVcsDriver.GitVcsDriver["Service"]["readRangeContext"] = Effect.fn(
@@ -3838,6 +4161,16 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
     pushCurrentBranch: (cwd, fallbackBranch, options) =>
       withListRefsInvalidation(cwd, pushCurrentBranch(cwd, fallbackBranch, options)),
     pullCurrentBranch: (cwd) => withListRefsInvalidation(cwd, pullCurrentBranch(cwd)),
+    stagePaths: (cwd, paths) => withListRefsInvalidation(cwd, stagePaths(cwd, paths)),
+    unstagePaths: (cwd, paths) => withListRefsInvalidation(cwd, unstagePaths(cwd, paths)),
+    discardPaths: (cwd, paths) => withListRefsInvalidation(cwd, discardPaths(cwd, paths)),
+    stageHunk: (cwd, patch) => withListRefsInvalidation(cwd, stageHunk(cwd, patch)),
+    unstageHunk: (cwd, patch) => withListRefsInvalidation(cwd, unstageHunk(cwd, patch)),
+    discardHunk: (cwd, patch) => withListRefsInvalidation(cwd, discardHunk(cwd, patch)),
+    stash: (input) => withListRefsInvalidation(input.cwd, stash(input)),
+    amendCommit: (cwd, commitMessage) =>
+      withListRefsInvalidation(cwd, amendCommit(cwd, commitMessage)),
+    undoLastCommit: (cwd) => withListRefsInvalidation(cwd, undoLastCommit(cwd)),
     readRangeContext,
     getReviewDiffPreview,
     getReviewDiffFileContents,

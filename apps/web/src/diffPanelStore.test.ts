@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, it } from "vite-plus/test";
 import {
   gitScopeLabel,
   selectThreadDiffPanelSelection,
+  shouldResetDiffSelectionOnGenericOpen,
   sourceKindForGitScope,
   useDiffPanelStore,
 } from "./diffPanelStore";
@@ -22,12 +23,14 @@ describe("diffPanelStore", () => {
   it("defaults each thread to uncommitted changes without requiring git status", () => {
     expect(
       selectThreadDiffPanelSelection(useDiffPanelStore.getState().byThreadKey, THREAD_REF),
-    ).toEqual({ kind: "uncommitted" });
+    ).toEqual({ kind: "uncommitted", filePath: null, revealRequestId: 0 });
   });
 
   it("defaults to uncommitted changes before a thread is selected", () => {
     expect(selectThreadDiffPanelSelection(useDiffPanelStore.getState().byThreadKey, null)).toEqual({
       kind: "uncommitted",
+      filePath: null,
+      revealRequestId: 0,
     });
   });
 
@@ -56,7 +59,7 @@ describe("diffPanelStore", () => {
 
     expect(
       selectThreadDiffPanelSelection(useDiffPanelStore.getState().byThreadKey, THREAD_REF),
-    ).toEqual({ kind: "uncommitted" });
+    ).toEqual({ kind: "uncommitted", filePath: null, revealRequestId: 0 });
 
     useDiffPanelStore.getState().selectBranchBaseRef(THREAD_REF, " origin/main ");
     expect(
@@ -77,7 +80,11 @@ describe("diffPanelStore", () => {
     store.selectGitScope(THREAD_REF, "staged");
 
     const { byThreadKey } = useDiffPanelStore.getState();
-    expect(selectThreadDiffPanelSelection(byThreadKey, THREAD_REF)).toEqual({ kind: "staged" });
+    expect(selectThreadDiffPanelSelection(byThreadKey, THREAD_REF)).toEqual({
+      kind: "staged",
+      filePath: null,
+      revealRequestId: 0,
+    });
     expect(selectThreadDiffPanelSelection(byThreadKey, otherThreadRef)).toEqual({
       kind: "branch",
       baseRef: "origin/main",
@@ -107,6 +114,32 @@ describe("diffPanelStore", () => {
     expect(
       selectThreadDiffPanelSelection(useDiffPanelStore.getState().byThreadKey, THREAD_REF),
     ).toEqual({ kind: "branch", baseRef: "origin/main" });
+  });
+
+  it("keeps Changes/timeline file targets across a generic Diff open", () => {
+    expect(
+      shouldResetDiffSelectionOnGenericOpen({
+        kind: "unstaged",
+        filePath: "packages/app/src/index.ts",
+        revealRequestId: 1,
+      }),
+    ).toBe(false);
+    expect(
+      shouldResetDiffSelectionOnGenericOpen({
+        kind: "turn",
+        turnId: TurnId.make("turn-1"),
+        filePath: "src/app.ts",
+        revealRequestId: 1,
+      }),
+    ).toBe(false);
+    expect(
+      shouldResetDiffSelectionOnGenericOpen({
+        kind: "uncommitted",
+        filePath: null,
+        revealRequestId: 0,
+      }),
+    ).toBe(true);
+    expect(shouldResetDiffSelectionOnGenericOpen({ kind: "branch", baseRef: null })).toBe(true);
   });
 
   it("reconciles a missing turn selection to the latest available turn", () => {

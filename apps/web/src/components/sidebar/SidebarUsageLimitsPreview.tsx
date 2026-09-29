@@ -4,7 +4,6 @@ import { refreshUsageLimits } from "@t3tools/client-runtime/state/usage";
 import {
   collectLimitAccounts,
   collectLimitPools,
-  formatDuration,
   type LimitPoolWindow,
   remainingPercent,
 } from "@t3tools/shared/usageLimits";
@@ -21,7 +20,13 @@ import { ProviderInstanceIcon } from "../chat/ProviderInstanceIcon";
 import { getDriverOption } from "../settings/providerDriverMeta";
 import { barColor } from "../usage/UsageLimits";
 import { readUsagePagePreferences, saveUsagePagePreferences } from "../usage/usagePagePreferences";
-import { hasSidebarUsagePreview, windowsForSidebarPreview } from "./usageLimitsPreviewModel";
+import {
+  hasSidebarUsagePreview,
+  sidebarPreviewColumns,
+  sidebarPreviewResetLabel,
+  sidebarPreviewShowsAggregate,
+  windowsForSidebarPreview,
+} from "./usageLimitsPreviewModel";
 
 const LIMITS_SHELF_EXPANDED_KEY = "t3code:sidebar-limits-shelf-expanded:v1";
 
@@ -44,21 +49,28 @@ function CompactWindowRow({
   readonly color: string;
   readonly now: number;
 }) {
-  const nextRefill = window.resets.find((reset) => reset.restoresPercent > 0);
-  const columns = window.columns.filter((column) => column.window !== null);
+  const columns = sidebarPreviewColumns(window);
+  const showAggregate = sidebarPreviewShowsAggregate(window);
+  const nextRefill = showAggregate
+    ? window.resets.find((reset) => reset.restoresPercent > 0)
+    : undefined;
   return (
     <div className="flex min-w-0 flex-col gap-1">
       <div className="flex min-w-0 items-baseline gap-1.5">
         <span className="min-w-0 truncate text-2xs text-sidebar-muted-foreground">
           {window.label}
         </span>
-        <span className="ms-auto shrink-0 text-xs font-semibold text-sidebar-foreground tabular-nums">
-          {window.remainingPercent}%
-        </span>
-        {nextRefill ? (
-          <span className="shrink-0 text-2xs text-sidebar-muted-foreground tabular-nums">
-            {nextRefill.at <= now ? "now" : formatDuration(nextRefill.at - now)}
-          </span>
+        {showAggregate ? (
+          <>
+            <span className="ms-auto shrink-0 text-xs font-semibold text-sidebar-foreground tabular-nums">
+              {window.remainingPercent}%
+            </span>
+            {nextRefill ? (
+              <span className="shrink-0 text-2xs text-sidebar-muted-foreground tabular-nums">
+                {sidebarPreviewResetLabel(nextRefill.member.window, now)}
+              </span>
+            ) : null}
+          </>
         ) : null}
       </div>
       <div
@@ -66,12 +78,21 @@ function CompactWindowRow({
         style={{ gridTemplateColumns: `repeat(${Math.max(columns.length, 1)}, minmax(0, 1fr))` }}
       >
         {columns.map((column) => {
-          const left = column.window ? remainingPercent(column.window) : 0;
+          const accountWindow = column.window;
+          const left = accountWindow ? remainingPercent(accountWindow) : 0;
+          const resetLabel =
+            !showAggregate && accountWindow ? sidebarPreviewResetLabel(accountWindow, now) : null;
+          const title = resetLabel
+            ? `${accountLabel(column)} ${left}% · ${resetLabel}`
+            : `${accountLabel(column)} ${left}%`;
           return (
             <div
               key={column.account.key}
-              className="relative h-4 min-w-0 overflow-hidden rounded-sm bg-muted"
-              title={`${accountLabel(column)} ${left}%`}
+              className={cn(
+                "relative min-w-0 overflow-hidden rounded-sm bg-muted",
+                showAggregate ? "h-4" : "min-h-4",
+              )}
+              title={title}
             >
               {/* Match Usage → Limits: translucent fill so Codex/Cursor read as soft gray. */}
               <div
@@ -79,9 +100,23 @@ function CompactWindowRow({
                 className="absolute inset-y-0 left-0 rounded-sm opacity-35"
                 style={{ width: `${left}%`, backgroundColor: color }}
               />
-              <span className="relative flex h-full items-center px-1 text-3xs font-medium text-sidebar-foreground/90 tabular-nums">
-                <span className="min-w-0 truncate">{accountLabel(column)}</span>
-                <span className="ms-auto shrink-0 pl-1">{left}%</span>
+              <span
+                className={cn(
+                  "relative flex px-1 text-3xs font-medium text-sidebar-foreground/90 tabular-nums",
+                  showAggregate
+                    ? "h-full items-center"
+                    : "min-h-4 flex-col justify-center gap-px py-0.5",
+                )}
+              >
+                <span className="flex min-w-0 items-center gap-1">
+                  <span className="min-w-0 truncate">{accountLabel(column)}</span>
+                  <span className="ms-auto shrink-0">{left}%</span>
+                </span>
+                {resetLabel ? (
+                  <span className="shrink-0 self-end text-sidebar-muted-foreground font-normal">
+                    {resetLabel}
+                  </span>
+                ) : null}
               </span>
             </div>
           );

@@ -447,6 +447,20 @@ describe("rightPanelStore", () => {
     });
   });
 
+  it("keeps changes as a singleton surface", () => {
+    useRightPanelStore.getState().open(refA, "changes");
+    useRightPanelStore.getState().open(refA, "diff");
+    useRightPanelStore.getState().open(refA, "changes");
+    expect(selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, refA)).toEqual({
+      isOpen: true,
+      activeSurfaceId: "changes",
+      surfaces: [
+        { id: "changes", kind: "changes" },
+        { id: "diff", kind: "diff" },
+      ],
+    });
+  });
+
   it("replaces the standalone explorer with peer file surfaces", () => {
     useRightPanelStore.getState().open(refA, "files");
     useRightPanelStore.getState().openFile(refA, "src/index.ts");

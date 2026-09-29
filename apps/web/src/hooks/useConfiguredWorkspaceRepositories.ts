@@ -127,7 +127,11 @@ export function useConfiguredWorkspaceRepositories(input: {
             repository,
             status: Option.getOrNull(AsyncResult.value(result)),
             error: result._tag === "Failure" ? formatEnvironmentQueryError(result.cause) : null,
-            isPending: result.waiting,
+            // Subscription atoms stay `waiting` while live; only treat as pending
+            // until the first status snapshot arrives.
+            isPending:
+              Option.isNone(AsyncResult.value(result)) &&
+              (result._tag === "Initial" || result.waiting),
           };
         }),
       ),
@@ -184,6 +188,10 @@ export function useConfiguredWorkspaceRepositories(input: {
     selectRepository,
     hasConfiguredRepositories: configured.length > 0,
     refresh,
+    /** True while discovering which repositories exist (project file / wildcards). */
+    isConfigPending:
+      (!useRepoRoots && projectFile.status === "loading") ||
+      (needsChildListing && listQuery.isPending),
     isPending:
       (!useRepoRoots && projectFile.status === "loading") ||
       (needsChildListing && listQuery.isPending) ||

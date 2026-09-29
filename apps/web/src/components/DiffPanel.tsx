@@ -62,6 +62,7 @@ import { DiffPanelLoadingState, DiffPanelShell, type DiffPanelMode } from "./Dif
 import { DiffStatLabel } from "./chat/DiffStatLabel";
 import { AnnotatableCodeView, type AnnotatableCodeViewHandle } from "./diffs/AnnotatableCodeView";
 import { DiffFileTree } from "./diffs/DiffFileTree";
+import { DiffScmFileActions } from "./diffs/DiffScmFileActions";
 import { diffFileTreeEntries } from "./diffs/diffFileTree.logic";
 import { Button } from "./ui/button";
 import { ToggleGroup, Toggle } from "./ui/toggle-group";
@@ -94,7 +95,12 @@ import { reviewEnvironment } from "../state/review";
 import { vcsEnvironment } from "../state/vcs";
 import { buildBaseRefChoices, filterBaseRefChoices } from "../lib/baseRefChoices";
 import { createGitDiffFileContentsLoader } from "../lib/diffFileContents";
-import { createWorkspaceDiff, filterWorkspaceDiffRepositories } from "../lib/workspaceDiff";
+import {
+  createWorkspaceDiff,
+  filterWorkspaceDiffRepositories,
+  includeWorkspaceDiffFile,
+} from "../lib/workspaceDiff";
+import { repositoryScopedFilePath } from "../changesPanel.logic";
 import { useConfiguredWorkspaceRepositories } from "../hooks/useConfiguredWorkspaceRepositories";
 import { useWorkspaceDiff } from "../hooks/useWorkspaceDiff";
 
@@ -261,9 +267,22 @@ export default function DiffPanel({
   const selectedGitSourceKind =
     selectedGitScope === "branch" ? "branch-range" : sourceKindForGitScope(selectedGitScope);
   const selectedBaseRef = diffSelection.kind === "branch" ? diffSelection.baseRef : null;
-  const selectedFilePath = diffSelection.kind === "turn" ? diffSelection.filePath : null;
+  const selectedFilePath =
+    diffSelection.kind === "turn"
+      ? diffSelection.filePath
+      : diffSelection.kind === "uncommitted" ||
+          diffSelection.kind === "staged" ||
+          diffSelection.kind === "unstaged"
+        ? diffSelection.filePath
+        : null;
   const selectedFileRevealRequestId =
-    diffSelection.kind === "turn" ? diffSelection.revealRequestId : 0;
+    diffSelection.kind === "turn"
+      ? diffSelection.revealRequestId
+      : diffSelection.kind === "uncommitted" ||
+          diffSelection.kind === "staged" ||
+          diffSelection.kind === "unstaged"
+        ? diffSelection.revealRequestId
+        : 0;
   const selectedTurn =
     selectedTurnId === null
       ? undefined
@@ -361,7 +380,7 @@ export default function DiffPanel({
     diffIgnoreWhitespace,
     hasConfiguredRepositories && selectedTurnId === null,
   );
-  const workspaceDiff = useMemo(
+  const aggregateWorkspaceDiff = useMemo(
     () =>
       hasConfiguredRepositories && selectedTurnId === null && activeThread
         ? createWorkspaceDiff(
@@ -386,11 +405,103 @@ export default function DiffPanel({
       resolvedTheme,
     ],
   );
+  const selectedWorkspaceRepository = useMemo(() => {
+    if (!hasConfiguredRepositories || !selectedFilePath) return null;
+    const normalizedPath = selectedFilePath.replaceAll("\\", "/");
+    return (
+      [...repositories]
+        .filter((repository) => repository.available)
+        .toSorted((left, right) => right.path.length - left.path.length)
+        .find((repository) => {
+          const repositoryPath = repository.path.replaceAll("\\", "/").replace(/\/+$/, "");
+          return (
+            repositoryPath === "." ||
+            repositoryPath === "" ||
+            normalizedPath === repositoryPath ||
+            normalizedPath.startsWith(`${repositoryPath}/`)
+          );
+        }) ?? null
+    );
+  }, [hasConfiguredRepositories, repositories, selectedFilePath]);
+  const selectedWorkspaceRelativePath = selectedWorkspaceRepository
+    ? repositoryScopedFilePath(selectedWorkspaceRepository.path, selectedFilePath ?? "")
+    : null;
+  const selectedWorkspaceRepositoryResult = selectedWorkspaceRepository
+    ? workspaceDiffQuery.results.find(
+        (result) => result.repository.cwd === selectedWorkspaceRepository.cwd,
+      )
+    : undefined;
+  const selectedWorkspaceSource = selectedWorkspaceRepositoryResult?.data?.sources.find(
+    (source) => source.kind === selectedGitSourceKind,
+  );
+  const selectedWorkspaceFileMetadata = selectedWorkspaceSource?.files?.find(
+    (file) => file.path === selectedWorkspaceRelativePath,
+  );
+  const aggregateContainsSelectedFile =
+    selectedFilePath !== null &&
+    (aggregateWorkspaceDiff?.files.some((file) => resolveFileDiffPath(file) === selectedFilePath) ??
+      false);
+  const selectedWorkspaceFilePreview = useEnvironmentQuery(
+    selectedWorkspaceRepository &&
+      selectedWorkspaceRelativePath &&
+      activeThread &&
+      selectedTurnId === null &&
+      selectedFilePath &&
+      !aggregateContainsSelectedFile &&
+      selectedWorkspaceRepositoryResult?.isPending !== true
+      ? reviewEnvironment.diffPreview({
+          environmentId: activeThread.environmentId,
+          input: {
+            cwd: selectedWorkspaceRepository.cwd,
+            ...(repositoryBaseRefs[selectedWorkspaceRepository.cwd]
+              ? { baseRef: repositoryBaseRefs[selectedWorkspaceRepository.cwd] }
+              : {}),
+            ignoreWhitespace: diffIgnoreWhitespace,
+            file: {
+              path: selectedWorkspaceRelativePath,
+              previousPath: selectedWorkspaceFileMetadata?.previousPath ?? null,
+              sourceKind: selectedGitSourceKind,
+            },
+          },
+        })
+      : null,
+  );
+  const selectedWorkspaceFileSource = selectedWorkspaceFilePreview.data?.sources.find(
+    (source) => source.kind === selectedGitSourceKind,
+  );
+  const selectedWorkspaceFileDiff = useMemo(
+    () =>
+      activeThread && selectedWorkspaceRepository && selectedWorkspaceFileSource
+        ? createWorkspaceDiff(
+            [{ repository: selectedWorkspaceRepository, source: selectedWorkspaceFileSource }],
+            activeThread.environmentId,
+            getDiffFileContents,
+            resolvedTheme,
+          )
+        : null,
+    [
+      activeThread,
+      selectedWorkspaceRepository,
+      selectedWorkspaceFileSource,
+      getDiffFileContents,
+      resolvedTheme,
+    ],
+  );
+  const workspaceDiff = useMemo(() => {
+    if (!aggregateWorkspaceDiff) return selectedWorkspaceFileDiff;
+    if (!selectedFilePath || !selectedWorkspaceFileDiff) return aggregateWorkspaceDiff;
+    return includeWorkspaceDiffFile(
+      aggregateWorkspaceDiff,
+      selectedWorkspaceFileDiff,
+      selectedFilePath,
+    );
+  }, [aggregateWorkspaceDiff, selectedFilePath, selectedWorkspaceFileDiff]);
   const refreshPreviewQuery = branchDiffPreview.refresh;
   const refreshDiffFromUserAction = useCallback(() => {
     if (hasConfiguredRepositories && selectedTurnId === null) {
       refreshConfiguredRepositories();
       workspaceDiffQuery.refresh();
+      selectedWorkspaceFilePreview.refresh();
       return;
     }
     refreshPreviewQuery();
@@ -399,6 +510,7 @@ export default function DiffPanel({
     selectedTurnId,
     refreshConfiguredRepositories,
     workspaceDiffQuery,
+    selectedWorkspaceFilePreview,
     refreshPreviewQuery,
   ]);
 
@@ -495,12 +607,14 @@ export default function DiffPanel({
   const isLoadingSelectedPatch = selectedTurn
     ? activeCheckpointDiff.isPending
     : workspaceDiff
-      ? workspaceDiffQuery.isPending
+      ? workspaceDiffQuery.isPending || selectedWorkspaceFilePreview.isPending
       : branchDiffPreview.isPending;
   const selectedPatchError = selectedTurn
     ? activeCheckpointDiff.error
     : workspaceDiff
-      ? (workspaceDiffQuery.results.find((result) => result.error)?.error ?? null)
+      ? (selectedWorkspaceFilePreview.error ??
+        workspaceDiffQuery.results.find((result) => result.error)?.error ??
+        null)
       : branchDiffPreview.error;
   const hasResolvedPatch = typeof selectedPatch === "string";
   const hasNoNetChanges = workspaceDiff
@@ -569,7 +683,8 @@ export default function DiffPanel({
 
   const isRefreshingDiff =
     (workspaceDiff ? workspaceDiffQuery.isPending : branchDiffPreview.isPending) ||
-    areFilePatchesPending;
+    areFilePatchesPending ||
+    selectedWorkspaceFilePreview.isPending;
   const renderableFileEntries = useMemo(
     () => renderableFiles.map(getCachedFileEntry),
     [renderableFiles],
@@ -708,9 +823,22 @@ export default function DiffPanel({
       externalRevealRef.current.key === key
     )
       return;
+    // Wait until the file exists in the loaded diff — marking the reveal early
+    // would skip retries after workspace/source diffs finish loading.
+    const fileReady = renderableFileEntries.some(
+      (candidate) => resolveFileDiffPath(candidate.fileDiff) === selectedFilePath,
+    );
+    if (!fileReady) return;
     externalRevealRef.current = { cache: filePatchScope, key };
     revealDiffFile(selectedFilePath);
-  }, [lazySource, selectedFilePath, selectedFileRevealRequestId, filePatchScope, revealDiffFile]);
+  }, [
+    lazySource,
+    selectedFilePath,
+    selectedFileRevealRequestId,
+    filePatchScope,
+    revealDiffFile,
+    renderableFileEntries,
+  ]);
 
   const openDiffFile = useCallback(
     (filePath: string) => {
@@ -1213,7 +1341,7 @@ export default function DiffPanel({
                 {warning}
               </p>
             ))}
-            {selectedPatchError && !renderablePatch && (
+            {selectedPatchError && (!renderablePatch || selectedWorkspaceFilePreview.error) && (
               <div className="px-3">
                 <p className="mb-2 text-2xs text-error/80">{selectedPatchError}</p>
               </div>
@@ -1306,11 +1434,41 @@ export default function DiffPanel({
                     renderHeaderFilenameSuffix={(fileDiff) => {
                       const path = resolveFileDiffPath(fileDiff);
                       const stat = fileStats.get(path);
+                      const scmRepository =
+                        hasConfiguredRepositories && repositories.length > 0
+                          ? [...repositories]
+                              .filter((repository) => repository.available)
+                              .toSorted((left, right) => right.path.length - left.path.length)
+                              .find(
+                                (repository) =>
+                                  repository.path === "." ||
+                                  repository.path === "" ||
+                                  path === repository.path ||
+                                  path.startsWith(`${repository.path}/`),
+                              )
+                          : null;
+                      const scmTarget =
+                        activeThread !== null &&
+                        (scmRepository?.cwd ?? activeCwd) != null &&
+                        (selectedGitScope === "staged" || selectedGitScope === "unstaged")
+                          ? {
+                              environmentId: activeThread.environmentId,
+                              cwd: scmRepository?.cwd ?? activeCwd!,
+                            }
+                          : null;
                       return (
                         <>
                           <DiffFilePathCopyButton filePath={path} />
                           {stat ? (
                             <DiffFileStatus {...fileStates.get(path)} retry={() => retry(path)} />
+                          ) : null}
+                          {scmTarget ? (
+                            <DiffScmFileActions
+                              fileDiff={fileDiff}
+                              scope={selectedGitScope}
+                              target={scmTarget}
+                              repositoryPath={scmRepository?.path ?? "."}
+                            />
                           ) : null}
                         </>
                       );

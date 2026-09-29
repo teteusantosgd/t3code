@@ -354,6 +354,8 @@ function toLocalStatusPart(status: VcsStatusResult): VcsStatusLocalResult {
     refName: status.refName,
     hasWorkingTreeChanges: status.hasWorkingTreeChanges,
     workingTree: status.workingTree,
+    ...(status.staged ? { staged: status.staged } : {}),
+    ...(status.unstaged ? { unstaged: status.unstaged } : {}),
   };
 }
 

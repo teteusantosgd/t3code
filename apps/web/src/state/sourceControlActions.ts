@@ -16,6 +16,7 @@ import type {
   SourceControlCloneProtocol,
   SourceControlRepositoryVisibility,
   ThreadId,
+  VcsStashInput,
 } from "@t3tools/contracts";
 import * as Cause from "effect/Cause";
 import * as Option from "effect/Option";
@@ -196,6 +197,138 @@ export function useVcsPullAction(scope: SourceControlActionScope) {
     action,
     onSuccess: status.refresh,
   });
+}
+
+export interface VcsRepositoryTarget {
+  readonly environmentId: EnvironmentId;
+  readonly cwd: string;
+}
+
+/**
+ * Source Control mutations for a surface that spans several checkouts: the
+ * repository travels with each call, so one hook instance serves every
+ * repository a panel renders. Each mutation asks the server to recompute the
+ * status it just invalidated, because the index changed underneath the
+ * subscription rather than the working tree.
+ *
+ * Long-running actions (commit, pull, publish) belong in the scope-based hooks
+ * above: they take over the shared source-control action state that the branch
+ * toolbar renders, while staging a file is not an action a user waits on.
+ */
+export function useVcsChangeActions() {
+  const refreshStatus = useAtomCommand(vcsEnvironment.refreshStatus, { reportFailure: false });
+  const stagePaths = useAtomCommand(vcsEnvironment.stagePaths, { reportFailure: false });
+  const unstagePaths = useAtomCommand(vcsEnvironment.unstagePaths, { reportFailure: false });
+  const discardPaths = useAtomCommand(vcsEnvironment.discardPaths, { reportFailure: false });
+  const stageHunk = useAtomCommand(vcsEnvironment.stageHunk, { reportFailure: false });
+  const unstageHunk = useAtomCommand(vcsEnvironment.unstageHunk, { reportFailure: false });
+  const discardHunk = useAtomCommand(vcsEnvironment.discardHunk, { reportFailure: false });
+  const stash = useAtomCommand(vcsEnvironment.stash, { reportFailure: false });
+  const amendCommit = useAtomCommand(vcsEnvironment.amendCommit, { reportFailure: false });
+  const undoLastCommit = useAtomCommand(vcsEnvironment.undoLastCommit, { reportFailure: false });
+  const push = useAtomCommand(vcsEnvironment.push, { reportFailure: false });
+  const sync = useAtomCommand(vcsEnvironment.sync, { reportFailure: false });
+
+  const settle = useCallback(
+    async <R extends AtomCommandResult<unknown, unknown>>(
+      target: VcsRepositoryTarget,
+      run: () => Promise<R>,
+    ) => {
+      const result = await run();
+      void refreshStatus({
+        environmentId: target.environmentId,
+        input: { cwd: target.cwd },
+      });
+      return result;
+    },
+    [refreshStatus],
+  );
+
+  return {
+    stagePaths: useCallback(
+      (target: VcsRepositoryTarget, paths: ReadonlyArray<string>) =>
+        settle(target, () =>
+          stagePaths({ environmentId: target.environmentId, input: { cwd: target.cwd, paths } }),
+        ),
+      [settle, stagePaths],
+    ),
+    unstagePaths: useCallback(
+      (target: VcsRepositoryTarget, paths: ReadonlyArray<string>) =>
+        settle(target, () =>
+          unstagePaths({ environmentId: target.environmentId, input: { cwd: target.cwd, paths } }),
+        ),
+      [settle, unstagePaths],
+    ),
+    discardPaths: useCallback(
+      (target: VcsRepositoryTarget, paths: ReadonlyArray<string>) =>
+        settle(target, () =>
+          discardPaths({ environmentId: target.environmentId, input: { cwd: target.cwd, paths } }),
+        ),
+      [settle, discardPaths],
+    ),
+    stageHunk: useCallback(
+      (target: VcsRepositoryTarget, hunk: { path: string; patch: string }) =>
+        settle(target, () =>
+          stageHunk({ environmentId: target.environmentId, input: { cwd: target.cwd, ...hunk } }),
+        ),
+      [settle, stageHunk],
+    ),
+    unstageHunk: useCallback(
+      (target: VcsRepositoryTarget, hunk: { path: string; patch: string }) =>
+        settle(target, () =>
+          unstageHunk({ environmentId: target.environmentId, input: { cwd: target.cwd, ...hunk } }),
+        ),
+      [settle, unstageHunk],
+    ),
+    discardHunk: useCallback(
+      (target: VcsRepositoryTarget, hunk: { path: string; patch: string }) =>
+        settle(target, () =>
+          discardHunk({ environmentId: target.environmentId, input: { cwd: target.cwd, ...hunk } }),
+        ),
+      [settle, discardHunk],
+    ),
+    stash: useCallback(
+      (target: VcsRepositoryTarget, input: Omit<VcsStashInput, "cwd">) =>
+        settle(target, () =>
+          stash({ environmentId: target.environmentId, input: { cwd: target.cwd, ...input } }),
+        ),
+      [settle, stash],
+    ),
+    amendCommit: useCallback(
+      (target: VcsRepositoryTarget, commitMessage?: string) =>
+        settle(target, () =>
+          amendCommit({
+            environmentId: target.environmentId,
+            input: {
+              cwd: target.cwd,
+              ...(commitMessage?.trim() ? { commitMessage: commitMessage.trim() } : {}),
+            },
+          }),
+        ),
+      [settle, amendCommit],
+    ),
+    undoLastCommit: useCallback(
+      (target: VcsRepositoryTarget) =>
+        settle(target, () =>
+          undoLastCommit({ environmentId: target.environmentId, input: { cwd: target.cwd } }),
+        ),
+      [settle, undoLastCommit],
+    ),
+    push: useCallback(
+      (target: VcsRepositoryTarget) =>
+        settle(target, () =>
+          push({ environmentId: target.environmentId, input: { cwd: target.cwd } }),
+        ),
+      [settle, push],
+    ),
+    sync: useCallback(
+      (target: VcsRepositoryTarget) =>
+        settle(target, () =>
+          sync({ environmentId: target.environmentId, input: { cwd: target.cwd } }),
+        ),
+      [settle, sync],
+    ),
+  };
 }
 
 export function useGitStackedAction(scope: SourceControlActionScope) {

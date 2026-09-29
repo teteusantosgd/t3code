@@ -110,6 +110,107 @@ export const VcsPullInput = Schema.Struct({
 });
 export type VcsPullInput = typeof VcsPullInput.Type;
 
+/** Index/worktree letter shown in Source Control-style file lists. */
+export const VcsFileChangeStatus = Schema.Literals(["M", "A", "D", "R", "U", "?"]);
+export type VcsFileChangeStatus = typeof VcsFileChangeStatus.Type;
+
+export const VcsChangedFile = Schema.Struct({
+  path: TrimmedNonEmptyStringSchema,
+  status: VcsFileChangeStatus,
+  insertions: NonNegativeInt,
+  deletions: NonNegativeInt,
+});
+export type VcsChangedFile = typeof VcsChangedFile.Type;
+
+export const VcsChangedFileGroup = Schema.Struct({
+  files: Schema.Array(VcsChangedFile),
+  insertions: NonNegativeInt,
+  deletions: NonNegativeInt,
+});
+export type VcsChangedFileGroup = typeof VcsChangedFileGroup.Type;
+
+export const VcsPathsInput = Schema.Struct({
+  cwd: TrimmedNonEmptyStringSchema,
+  paths: Schema.Array(TrimmedNonEmptyStringSchema).check(Schema.isMinLength(1)),
+});
+export type VcsPathsInput = typeof VcsPathsInput.Type;
+
+/**
+ * One unified-diff hunk (including `diff --git` / `---` / `+++` headers) for
+ * `git apply --cached` / reverse apply. Clients send the hunk text they already
+ * have from the review diff preview.
+ */
+export const VcsHunkInput = Schema.Struct({
+  cwd: TrimmedNonEmptyStringSchema,
+  path: TrimmedNonEmptyStringSchema,
+  patch: TrimmedNonEmptyStringSchema.check(Schema.isMaxLength(1_000_000)),
+});
+export type VcsHunkInput = typeof VcsHunkInput.Type;
+
+export const VcsStashAction = Schema.Literals(["push", "pop", "apply", "drop", "list"]);
+export type VcsStashAction = typeof VcsStashAction.Type;
+
+export const VcsStashInput = Schema.Struct({
+  cwd: TrimmedNonEmptyStringSchema,
+  action: VcsStashAction,
+  message: Schema.optional(TrimmedNonEmptyStringSchema.check(Schema.isMaxLength(10_000))),
+  includeUntracked: Schema.optional(Schema.Boolean),
+  /** e.g. `stash@{0}` for pop/apply/drop; omitted means the latest stash. */
+  stashRef: Schema.optional(TrimmedNonEmptyStringSchema.check(Schema.isMaxLength(64))),
+});
+export type VcsStashInput = typeof VcsStashInput.Type;
+
+export const VcsStashEntry = Schema.Struct({
+  ref: TrimmedNonEmptyStringSchema,
+  message: TrimmedNonEmptyStringSchema,
+});
+export type VcsStashEntry = typeof VcsStashEntry.Type;
+
+export const VcsStashResult = Schema.Struct({
+  action: VcsStashAction,
+  entries: Schema.Array(VcsStashEntry),
+});
+export type VcsStashResult = typeof VcsStashResult.Type;
+
+export const VcsAmendCommitInput = Schema.Struct({
+  cwd: TrimmedNonEmptyStringSchema,
+  commitMessage: Schema.optional(TrimmedNonEmptyStringSchema.check(Schema.isMaxLength(10_000))),
+});
+export type VcsAmendCommitInput = typeof VcsAmendCommitInput.Type;
+
+export const VcsAmendCommitResult = Schema.Struct({
+  commitSha: TrimmedNonEmptyStringSchema,
+  subject: TrimmedNonEmptyStringSchema,
+});
+export type VcsAmendCommitResult = typeof VcsAmendCommitResult.Type;
+
+export const VcsUndoLastCommitInput = Schema.Struct({
+  cwd: TrimmedNonEmptyStringSchema,
+});
+export type VcsUndoLastCommitInput = typeof VcsUndoLastCommitInput.Type;
+
+export const VcsUndoLastCommitResult = Schema.Struct({
+  previousCommitSha: TrimmedNonEmptyStringSchema,
+});
+export type VcsUndoLastCommitResult = typeof VcsUndoLastCommitResult.Type;
+
+export const VcsPushInput = Schema.Struct({
+  cwd: TrimmedNonEmptyStringSchema,
+});
+export type VcsPushInput = typeof VcsPushInput.Type;
+
+export const VcsPushResult = Schema.Struct({
+  status: Schema.Literals(["pushed", "skipped_up_to_date"]),
+  refName: TrimmedNonEmptyStringSchema,
+  upstreamRef: TrimmedNonEmptyStringSchema.pipe(Schema.NullOr),
+});
+export type VcsPushResult = typeof VcsPushResult.Type;
+
+export const VcsSyncInput = Schema.Struct({
+  cwd: TrimmedNonEmptyStringSchema,
+});
+export type VcsSyncInput = typeof VcsSyncInput.Type;
+
 export const GitRunStackedActionInput = Schema.Struct({
   actionId: TrimmedNonEmptyStringSchema,
   cwd: TrimmedNonEmptyStringSchema,
@@ -217,6 +318,7 @@ const VcsStatusLocalShape = {
   isDefaultRef: Schema.Boolean,
   refName: Schema.NullOr(TrimmedNonEmptyStringSchema),
   hasWorkingTreeChanges: Schema.Boolean,
+  /** Combined working-tree changes vs HEAD (legacy / commit dialog). */
   workingTree: Schema.Struct({
     files: Schema.Array(
       Schema.Struct({
@@ -228,6 +330,10 @@ const VcsStatusLocalShape = {
     insertions: NonNegativeInt,
     deletions: NonNegativeInt,
   }),
+  /** Index-only changes; absent on older servers. */
+  staged: Schema.optional(VcsChangedFileGroup),
+  /** Worktree + untracked changes not in the index; absent on older servers. */
+  unstaged: Schema.optional(VcsChangedFileGroup),
 };
 
 const VcsStatusRemoteShape = {
@@ -336,6 +442,12 @@ export const VcsPullResult = Schema.Struct({
   upstreamRef: TrimmedNonEmptyStringSchema.pipe(Schema.NullOr),
 });
 export type VcsPullResult = typeof VcsPullResult.Type;
+
+export const VcsSyncResult = Schema.Struct({
+  pull: VcsPullResult,
+  push: VcsPushResult,
+});
+export type VcsSyncResult = typeof VcsSyncResult.Type;
 
 // RPC / domain errors
 export class GitCommandError extends Schema.TaggedError<GitCommandError>()("GitCommandError", {

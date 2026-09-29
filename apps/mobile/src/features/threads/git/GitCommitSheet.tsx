@@ -1,6 +1,7 @@
 import { useNavigation, type StaticScreenProps } from "@react-navigation/native";
-import { useCallback, useState } from "react";
-import { Platform, Pressable, ScrollView, useWindowDimensions, View } from "react-native";
+import type { VcsChangedFile, VcsStatusResult } from "@t3tools/contracts";
+import { useCallback, useMemo, useState } from "react";
+import { Alert, Platform, Pressable, ScrollView, useWindowDimensions, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { AndroidSheetHeader } from "../../../components/AndroidScreenHeader";
@@ -22,6 +23,141 @@ type GitCommitSheetProps = StaticScreenProps<{
   readonly threadId: string;
 }>;
 
+function resolveCommitFileGroups(status: VcsStatusResult) {
+  if (status.staged !== undefined || status.unstaged !== undefined) {
+    return {
+      hasSplitGroups: true,
+      staged: status.staged?.files ?? [],
+      unstaged: status.unstaged?.files ?? [],
+    };
+  }
+  return {
+    hasSplitGroups: false,
+    staged: [] as ReadonlyArray<VcsChangedFile>,
+    unstaged: status.workingTree.files.map((file) => ({
+      path: file.path,
+      status: "M" as const,
+      insertions: file.insertions,
+      deletions: file.deletions,
+    })),
+  };
+}
+
+function CommitFileEditRow(props: {
+  readonly file: VcsChangedFile;
+  readonly included: boolean;
+  readonly section: "staged" | "unstaged";
+  readonly hasSplitGroups: boolean;
+  readonly busy: boolean;
+  readonly onToggleIncluded: () => void;
+  readonly onStage: () => void;
+  readonly onUnstage: () => void;
+  readonly onDiscard: () => void;
+}) {
+  return (
+    <Pressable
+      className={cn(
+        "px-4 py-3 android:rounded-xl ios:rounded-[18px] ios:border",
+        props.included ? "android:bg-subtle ios:border-border" : "ios:border-border-subtle",
+      )}
+      accessibilityRole="checkbox"
+      accessibilityLabel={props.file.path}
+      accessibilityState={{ checked: props.included }}
+      onPress={props.onToggleIncluded}
+    >
+      {Platform.OS !== "android" ? (
+        <View
+          className={`absolute inset-0 rounded-[18px] ${props.included ? "bg-card" : "bg-subtle"}`}
+        />
+      ) : null}
+      <View className="gap-2">
+        <View className="flex-row items-start justify-between gap-3">
+          {Platform.OS === "android" ? (
+            <View
+              className={cn(
+                "mt-0.5 size-5 items-center justify-center rounded-sm",
+                props.included ? "bg-primary" : "border border-input-border",
+              )}
+            >
+              {props.included ? (
+                <SymbolView
+                  name="checkmark"
+                  size={16}
+                  tintColorClassName="accent-primary-foreground"
+                  type="monochrome"
+                />
+              ) : null}
+            </View>
+          ) : null}
+          <View className="flex-1 gap-1">
+            <Text
+              selectable
+              className={`text-sm font-t3-bold ${props.included ? "text-foreground" : "text-foreground-muted"}`}
+            >
+              {props.file.path}
+            </Text>
+            {!props.included ? (
+              <Text className="text-foreground-muted text-2xs leading-normal">
+                Excluded from this commit
+              </Text>
+            ) : null}
+          </View>
+          <View className="items-end gap-1">
+            <Text className="text-xs font-t3-bold text-adaptive-emerald-700-300">
+              +{props.file.insertions}
+            </Text>
+            <Text className="text-xs font-t3-bold text-adaptive-rose-700-300">
+              -{props.file.deletions}
+            </Text>
+          </View>
+        </View>
+        <View className="flex-row flex-wrap gap-2">
+          {props.section === "unstaged" || !props.hasSplitGroups ? (
+            <Pressable
+              className="rounded-full px-3 py-1.5 android:min-h-10 android:justify-center android:active:bg-subtle ios:bg-subtle"
+              disabled={props.busy}
+              onPress={(event) => {
+                event.stopPropagation();
+                props.onStage();
+              }}
+            >
+              <Text className="android:text-primary-text android:text-xs android:font-t3-medium ios:text-foreground ios:text-2xs ios:font-t3-bold ios:uppercase">
+                Stage
+              </Text>
+            </Pressable>
+          ) : null}
+          {props.section === "staged" && props.hasSplitGroups ? (
+            <Pressable
+              className="rounded-full px-3 py-1.5 android:min-h-10 android:justify-center android:active:bg-subtle ios:bg-subtle"
+              disabled={props.busy}
+              onPress={(event) => {
+                event.stopPropagation();
+                props.onUnstage();
+              }}
+            >
+              <Text className="android:text-primary-text android:text-xs android:font-t3-medium ios:text-foreground ios:text-2xs ios:font-t3-bold ios:uppercase">
+                Unstage
+              </Text>
+            </Pressable>
+          ) : null}
+          <Pressable
+            className="rounded-full px-3 py-1.5 android:min-h-10 android:justify-center android:active:bg-subtle ios:bg-subtle"
+            disabled={props.busy}
+            onPress={(event) => {
+              event.stopPropagation();
+              props.onDiscard();
+            }}
+          >
+            <Text className="android:text-danger android:text-xs android:font-t3-medium ios:text-danger-foreground ios:text-2xs ios:font-t3-bold ios:uppercase">
+              Discard
+            </Text>
+          </Pressable>
+        </View>
+      </View>
+    </Pressable>
+  );
+}
+
 export function GitCommitSheet(_props: GitCommitSheetProps) {
   const navigation = useNavigation();
   const insets = useSafeAreaInsets();
@@ -40,6 +176,18 @@ export function GitCommitSheet(_props: GitCommitSheetProps) {
       : null,
   );
 
+  const fileGroups = useMemo(
+    () =>
+      gitStatus.data
+        ? resolveCommitFileGroups(gitStatus.data)
+        : {
+            hasSplitGroups: false,
+            staged: [] as ReadonlyArray<VcsChangedFile>,
+            unstaged: [] as ReadonlyArray<VcsChangedFile>,
+          },
+    [gitStatus.data],
+  );
+
   const busy = gitState.gitOperationLabel !== null;
   const isDefaultRef = gitStatus.data?.isDefaultRef ?? false;
   const allFiles = gitStatus.data?.workingTree?.files ?? [];
@@ -55,6 +203,184 @@ export function GitCommitSheet(_props: GitCommitSheetProps) {
   const selectedDeletions = selectedFiles.reduce((sum, file) => sum + file.deletions, 0);
   const selectedFilePreview = selectedFiles.slice(0, 3);
 
+  const confirmDiscardPath = useCallback(
+    (path: string) => {
+      Alert.alert("Discard changes?", `Local changes to ${path} will be permanently lost.`, [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Discard",
+          style: "destructive",
+          onPress: () => void gitActions.discardSelectedPaths([path]),
+        },
+      ]);
+    },
+    [gitActions],
+  );
+
+  const toggleExcluded = useCallback((path: string) => {
+    setExcludedFiles((current) => {
+      const next = new Set(current);
+      if (next.has(path)) {
+        next.delete(path);
+      } else {
+        next.add(path);
+      }
+      return next;
+    });
+  }, []);
+
+  const renderEditFiles = () => {
+    const sections: ReadonlyArray<{
+      readonly key: string;
+      readonly title: string;
+      readonly section: "staged" | "unstaged";
+      readonly files: ReadonlyArray<VcsChangedFile>;
+    }> = fileGroups.hasSplitGroups
+      ? [
+          ...(fileGroups.staged.length > 0
+            ? [
+                {
+                  key: "staged",
+                  title: "Staged changes",
+                  section: "staged" as const,
+                  files: fileGroups.staged,
+                },
+              ]
+            : []),
+          ...(fileGroups.unstaged.length > 0
+            ? [
+                {
+                  key: "unstaged",
+                  title: "Unstaged changes",
+                  section: "unstaged" as const,
+                  files: fileGroups.unstaged,
+                },
+              ]
+            : []),
+        ]
+      : [
+          {
+            key: "unstaged",
+            title: "Changed files",
+            section: "unstaged" as const,
+            files: fileGroups.unstaged,
+          },
+        ];
+
+    return (
+      <View className="gap-3">
+        {sections.map((group) => (
+          <View key={group.key} className="gap-2">
+            <Text className="text-foreground-muted text-xs font-t3-bold uppercase tracking-[0.8px]">
+              {group.title}
+            </Text>
+            {group.files.map((file) => (
+              <CommitFileEditRow
+                key={`${group.key}-${file.path}`}
+                file={file}
+                section={group.section}
+                hasSplitGroups={fileGroups.hasSplitGroups}
+                included={!excludedFiles.has(file.path)}
+                busy={busy}
+                onToggleIncluded={() => toggleExcluded(file.path)}
+                onStage={() => void gitActions.stageSelectedPaths([file.path])}
+                onUnstage={() => void gitActions.unstageSelectedPaths([file.path])}
+                onDiscard={() => confirmDiscardPath(file.path)}
+              />
+            ))}
+          </View>
+        ))}
+      </View>
+    );
+  };
+
+  const renderPreviewFiles = () => {
+    if (fileGroups.hasSplitGroups) {
+      const stagedSelected = fileGroups.staged.filter((file) => !excludedFiles.has(file.path));
+      const unstagedSelected = fileGroups.unstaged.filter((file) => !excludedFiles.has(file.path));
+      const previewShown =
+        Math.min(3, stagedSelected.length) + Math.min(3, unstagedSelected.length);
+      return (
+        <View className="gap-3">
+          {stagedSelected.length > 0 ? (
+            <View className="gap-2">
+              <Text className="text-foreground-muted text-xs font-t3-bold uppercase tracking-[0.8px]">
+                Staged ({stagedSelected.length})
+              </Text>
+              {stagedSelected.slice(0, 3).map((file) => (
+                <View
+                  key={`staged-${file.path}`}
+                  className="flex-row items-center justify-between gap-3"
+                >
+                  <Text className="text-foreground flex-1 text-sm font-medium" numberOfLines={1}>
+                    {file.path}
+                  </Text>
+                  <Text className="text-xs font-t3-bold text-adaptive-emerald-700-300">
+                    +{file.insertions}
+                  </Text>
+                  <Text className="text-xs font-t3-bold text-adaptive-rose-700-300">
+                    -{file.deletions}
+                  </Text>
+                </View>
+              ))}
+            </View>
+          ) : null}
+          {unstagedSelected.length > 0 ? (
+            <View className="gap-2">
+              <Text className="text-foreground-muted text-xs font-t3-bold uppercase tracking-[0.8px]">
+                Unstaged ({unstagedSelected.length})
+              </Text>
+              {unstagedSelected.slice(0, 3).map((file) => (
+                <View
+                  key={`unstaged-${file.path}`}
+                  className="flex-row items-center justify-between gap-3"
+                >
+                  <Text className="text-foreground flex-1 text-sm font-medium" numberOfLines={1}>
+                    {file.path}
+                  </Text>
+                  <Text className="text-xs font-t3-bold text-adaptive-emerald-700-300">
+                    +{file.insertions}
+                  </Text>
+                  <Text className="text-xs font-t3-bold text-adaptive-rose-700-300">
+                    -{file.deletions}
+                  </Text>
+                </View>
+              ))}
+            </View>
+          ) : null}
+          {selectedFiles.length > previewShown ? (
+            <Text className="text-foreground-muted text-xs leading-snug">
+              +{selectedFiles.length - previewShown} more files
+            </Text>
+          ) : null}
+        </View>
+      );
+    }
+
+    return (
+      <View className="gap-2">
+        {selectedFilePreview.map((file) => (
+          <View key={file.path} className="flex-row items-center justify-between gap-3">
+            <Text className="text-foreground flex-1 text-sm font-medium" numberOfLines={1}>
+              {file.path}
+            </Text>
+            <Text className="text-xs font-t3-bold text-adaptive-emerald-700-300">
+              +{file.insertions}
+            </Text>
+            <Text className="text-xs font-t3-bold text-adaptive-rose-700-300">
+              -{file.deletions}
+            </Text>
+          </View>
+        ))}
+        {selectedFiles.length > selectedFilePreview.length ? (
+          <Text className="text-foreground-muted text-xs leading-snug">
+            +{selectedFiles.length - selectedFilePreview.length} more files
+          </Text>
+        ) : null}
+      </View>
+    );
+  };
+
   const runCommitAction = useCallback(
     async (featureBranch: boolean) => {
       const commitMessage = dialogCommitMessage.trim();
@@ -68,6 +394,9 @@ export function GitCommitSheet(_props: GitCommitSheetProps) {
     },
     [allSelected, dialogCommitMessage, gitActions, navigation, selectedFiles],
   );
+
+  const hasAnyChangedFiles =
+    allFiles.length > 0 || fileGroups.staged.length > 0 || fileGroups.unstaged.length > 0;
 
   return (
     <View
@@ -149,108 +478,14 @@ export function GitCommitSheet(_props: GitCommitSheetProps) {
               </View>
             </View>
 
-            {allFiles.length === 0 ? (
+            {!hasAnyChangedFiles ? (
               <Text className="text-foreground-secondary text-sm leading-normal">
                 No changed files are available to commit.
               </Text>
-            ) : !isEditingFiles ? (
-              <View className="gap-2">
-                {selectedFilePreview.map((file) => (
-                  <View key={file.path} className="flex-row items-center justify-between gap-3">
-                    <Text className="text-foreground flex-1 text-sm font-medium" numberOfLines={1}>
-                      {file.path}
-                    </Text>
-                    <Text className="text-xs font-t3-bold text-adaptive-emerald-700-300">
-                      +{file.insertions}
-                    </Text>
-                    <Text className="text-xs font-t3-bold text-adaptive-rose-700-300">
-                      -{file.deletions}
-                    </Text>
-                  </View>
-                ))}
-                {selectedFiles.length > selectedFilePreview.length ? (
-                  <Text className="text-foreground-muted text-xs leading-snug">
-                    +{selectedFiles.length - selectedFilePreview.length} more files
-                  </Text>
-                ) : null}
-              </View>
+            ) : isEditingFiles ? (
+              renderEditFiles()
             ) : (
-              <View className="gap-2">
-                {allFiles.map((file) => {
-                  const included = !excludedFiles.has(file.path);
-                  return (
-                    <Pressable
-                      key={file.path}
-                      className={cn(
-                        "px-4 py-3 android:rounded-xl ios:rounded-[18px] ios:border",
-                        included
-                          ? "android:bg-subtle ios:border-border"
-                          : "ios:border-border-subtle",
-                      )}
-                      accessibilityRole="checkbox"
-                      accessibilityLabel={file.path}
-                      accessibilityState={{ checked: included }}
-                      onPress={() => {
-                        setExcludedFiles((current) => {
-                          const next = new Set(current);
-                          if (next.has(file.path)) {
-                            next.delete(file.path);
-                          } else {
-                            next.add(file.path);
-                          }
-                          return next;
-                        });
-                      }}
-                    >
-                      {Platform.OS !== "android" ? (
-                        <View
-                          className={`absolute inset-0 rounded-[18px] ${included ? "bg-card" : "bg-subtle"}`}
-                        />
-                      ) : null}
-                      <View className="flex-row items-start justify-between gap-3">
-                        {Platform.OS === "android" ? (
-                          <View
-                            className={cn(
-                              "mt-0.5 size-5 items-center justify-center rounded-sm",
-                              included ? "bg-primary" : "border border-input-border",
-                            )}
-                          >
-                            {included ? (
-                              <SymbolView
-                                name="checkmark"
-                                size={16}
-                                tintColorClassName="accent-primary-foreground"
-                                type="monochrome"
-                              />
-                            ) : null}
-                          </View>
-                        ) : null}
-                        <View className="flex-1 gap-1">
-                          <Text
-                            selectable
-                            className={`text-sm font-t3-bold ${included ? "text-foreground" : "text-foreground-muted"}`}
-                          >
-                            {file.path}
-                          </Text>
-                          {!included ? (
-                            <Text className="text-foreground-muted text-2xs leading-normal">
-                              Excluded from this commit
-                            </Text>
-                          ) : null}
-                        </View>
-                        <View className="items-end gap-1">
-                          <Text className="text-xs font-t3-bold text-adaptive-emerald-700-300">
-                            +{file.insertions}
-                          </Text>
-                          <Text className="text-xs font-t3-bold text-adaptive-rose-700-300">
-                            -{file.deletions}
-                          </Text>
-                        </View>
-                      </View>
-                    </Pressable>
-                  );
-                })}
-              </View>
+              renderPreviewFiles()
             )}
           </View>
 

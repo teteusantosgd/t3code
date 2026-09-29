@@ -17,8 +17,17 @@ import {
   type GitPreparePullRequestThreadInput,
   type GitPreparePullRequestThreadResult,
   type GitPullRequestRefInput,
+  type VcsAmendCommitInput,
+  type VcsAmendCommitResult,
+  type VcsHunkInput,
+  type VcsPathsInput,
   type VcsPullResult,
+  type VcsPushResult,
   type VcsRemoveWorktreeInput,
+  type VcsStashInput,
+  type VcsStashResult,
+  type VcsSyncResult,
+  type VcsUndoLastCommitResult,
   type GitResolvePullRequestResult,
   type GitRunStackedActionInput,
   type GitRunStackedActionResult,
@@ -54,6 +63,22 @@ export class GitWorkflowService extends Context.Service<
     readonly invalidateRemoteStatus: (cwd: string) => Effect.Effect<void, never>;
     readonly invalidateStatus: (cwd: string) => Effect.Effect<void, never>;
     readonly pullCurrentBranch: (cwd: string) => Effect.Effect<VcsPullResult, GitCommandError>;
+    readonly pushCurrentBranch: (cwd: string) => Effect.Effect<VcsPushResult, GitCommandError>;
+    /** Fast-forward pull (when an upstream exists) followed by a push. */
+    readonly syncCurrentBranch: (cwd: string) => Effect.Effect<VcsSyncResult, GitCommandError>;
+    readonly stagePaths: (input: VcsPathsInput) => Effect.Effect<void, GitCommandError>;
+    readonly unstagePaths: (input: VcsPathsInput) => Effect.Effect<void, GitCommandError>;
+    readonly discardPaths: (input: VcsPathsInput) => Effect.Effect<void, GitCommandError>;
+    readonly stageHunk: (input: VcsHunkInput) => Effect.Effect<void, GitCommandError>;
+    readonly unstageHunk: (input: VcsHunkInput) => Effect.Effect<void, GitCommandError>;
+    readonly discardHunk: (input: VcsHunkInput) => Effect.Effect<void, GitCommandError>;
+    readonly stash: (input: VcsStashInput) => Effect.Effect<VcsStashResult, GitCommandError>;
+    readonly amendCommit: (
+      input: VcsAmendCommitInput,
+    ) => Effect.Effect<VcsAmendCommitResult, GitCommandError>;
+    readonly undoLastCommit: (
+      cwd: string,
+    ) => Effect.Effect<VcsUndoLastCommitResult, GitCommandError>;
     readonly runStackedAction: (
       input: GitRunStackedActionInput,
       options?: GitManager.GitRunStackedActionOptions,
@@ -125,6 +150,8 @@ function nonRepositoryLocalStatus(): VcsStatusLocalResult {
       insertions: 0,
       deletions: 0,
     },
+    staged: { files: [], insertions: 0, deletions: 0 },
+    unstaged: { files: [], insertions: 0, deletions: 0 },
   };
 }
 
@@ -261,6 +288,15 @@ export const make = Effect.gen(function* () {
     return true;
   });
 
+  const pushCurrentBranch = (cwd: string): Effect.Effect<VcsPushResult, GitCommandError> =>
+    git.pushCurrentBranch(cwd, null).pipe(
+      Effect.map((result) => ({
+        status: result.status,
+        refName: result.branch,
+        upstreamRef: result.upstreamBranch ?? null,
+      })),
+    );
+
   const routeGitManager =
     <Input extends { readonly cwd: string }, Output>(
       operation: string,
@@ -321,6 +357,64 @@ export const make = Effect.gen(function* () {
     pullCurrentBranch: (cwd) =>
       ensureGitCommand("GitWorkflowService.pullCurrentBranch", cwd).pipe(
         Effect.andThen(git.pullCurrentBranch(cwd)),
+      ),
+    pushCurrentBranch: (cwd) =>
+      ensureGitCommand("GitWorkflowService.pushCurrentBranch", cwd).pipe(
+        Effect.andThen(pushCurrentBranch(cwd)),
+      ),
+    syncCurrentBranch: (cwd) =>
+      ensureGitCommand("GitWorkflowService.syncCurrentBranch", cwd).pipe(
+        Effect.andThen(
+          Effect.gen(function* () {
+            const details = yield* git.statusDetails(cwd);
+            // A branch that was never published has nothing to fast-forward
+            // from, so sync degenerates to the push that publishes it.
+            const pull = details.hasUpstream
+              ? yield* git.pullCurrentBranch(cwd)
+              : ({
+                  status: "skipped_up_to_date",
+                  refName: details.branch ?? "HEAD",
+                  upstreamRef: null,
+                } satisfies VcsPullResult);
+            return { pull, push: yield* pushCurrentBranch(cwd) };
+          }),
+        ),
+      ),
+    stagePaths: (input) =>
+      ensureGitCommand("GitWorkflowService.stagePaths", input.cwd).pipe(
+        Effect.andThen(git.stagePaths(input.cwd, input.paths)),
+      ),
+    unstagePaths: (input) =>
+      ensureGitCommand("GitWorkflowService.unstagePaths", input.cwd).pipe(
+        Effect.andThen(git.unstagePaths(input.cwd, input.paths)),
+      ),
+    discardPaths: (input) =>
+      ensureGitCommand("GitWorkflowService.discardPaths", input.cwd).pipe(
+        Effect.andThen(git.discardPaths(input.cwd, input.paths)),
+      ),
+    stageHunk: (input) =>
+      ensureGitCommand("GitWorkflowService.stageHunk", input.cwd).pipe(
+        Effect.andThen(git.stageHunk(input.cwd, input.patch)),
+      ),
+    unstageHunk: (input) =>
+      ensureGitCommand("GitWorkflowService.unstageHunk", input.cwd).pipe(
+        Effect.andThen(git.unstageHunk(input.cwd, input.patch)),
+      ),
+    discardHunk: (input) =>
+      ensureGitCommand("GitWorkflowService.discardHunk", input.cwd).pipe(
+        Effect.andThen(git.discardHunk(input.cwd, input.patch)),
+      ),
+    stash: (input) =>
+      ensureGitCommand("GitWorkflowService.stash", input.cwd).pipe(
+        Effect.andThen(git.stash(input)),
+      ),
+    amendCommit: (input) =>
+      ensureGitCommand("GitWorkflowService.amendCommit", input.cwd).pipe(
+        Effect.andThen(git.amendCommit(input.cwd, input.commitMessage)),
+      ),
+    undoLastCommit: (cwd) =>
+      ensureGitCommand("GitWorkflowService.undoLastCommit", cwd).pipe(
+        Effect.andThen(git.undoLastCommit(cwd)),
       ),
     runStackedAction: (input, options) =>
       ensureGit("GitWorkflowService.runStackedAction", input.cwd).pipe(

@@ -76,6 +76,33 @@ export function createWorkspaceDiff<E>(
   return { files, warnings, loadDiffFiles, rawPatch };
 }
 
+/** Adds a file-only preview when the workspace patch was truncated before that file. */
+export function includeWorkspaceDiffFile(
+  workspaceDiff: ReturnType<typeof createWorkspaceDiff>,
+  fileDiff: ReturnType<typeof createWorkspaceDiff>,
+  selectedPath: string,
+) {
+  if (workspaceDiff.files.some((file) => resolveFileDiffPath(file) === selectedPath)) {
+    return workspaceDiff;
+  }
+
+  const selectedFile = fileDiff.files.find((file) => resolveFileDiffPath(file) === selectedPath);
+  if (!selectedFile) return workspaceDiff;
+
+  const selectedFileKey = buildFileDiffIdentityKey(selectedFile);
+  return {
+    ...workspaceDiff,
+    files: [...workspaceDiff.files, selectedFile],
+    // The selected file's bounded preview is parseable, even if another repository's
+    // aggregate patch fell back to raw text.
+    rawPatch: null,
+    loadDiffFiles: (file: FileDiffMetadata) =>
+      buildFileDiffIdentityKey(file) === selectedFileKey
+        ? fileDiff.loadDiffFiles(file)
+        : workspaceDiff.loadDiffFiles(file),
+  };
+}
+
 export function filterWorkspaceDiffRepositories(
   repositories: readonly WorkspaceDiffRepository[],
   repositoryFilter: string | null,

@@ -35,6 +35,13 @@ export function useSelectedThreadGitActions() {
   const createRef = useAtomCommand(vcsEnvironment.createRef, { reportFailure: false });
   const createWorktree = useAtomCommand(vcsEnvironment.createWorktree, { reportFailure: false });
   const pull = useAtomCommand(vcsEnvironment.pull, { reportFailure: false });
+  const stagePaths = useAtomCommand(vcsEnvironment.stagePaths, { reportFailure: false });
+  const unstagePaths = useAtomCommand(vcsEnvironment.unstagePaths, { reportFailure: false });
+  const discardPaths = useAtomCommand(vcsEnvironment.discardPaths, { reportFailure: false });
+  const stash = useAtomCommand(vcsEnvironment.stash, { reportFailure: false });
+  const amendCommit = useAtomCommand(vcsEnvironment.amendCommit, { reportFailure: false });
+  const undoLastCommit = useAtomCommand(vcsEnvironment.undoLastCommit, { reportFailure: false });
+  const sync = useAtomCommand(vcsEnvironment.sync, { reportFailure: false });
   const { selectedThread, selectedThreadProject } = useThreadSelection();
   const { selectedThreadCwd, selectedThreadWorktreePath } = useSelectedThreadWorktree();
   const runStackedAction = useAtomCommand(
@@ -292,6 +299,130 @@ export function useSelectedThreadGitActions() {
     [createWorktree, runSelectedThreadGitMutation, syncSelectedThreadBranchState],
   );
 
+  const runSelectedThreadVcsMutation = useCallback(
+    async <T, E>(
+      execute: (input: {
+        readonly thread: EnvironmentThreadShell;
+        readonly cwd: string;
+      }) => Promise<AtomCommandResult<T, E>>,
+    ): Promise<T | null> => {
+      if (!selectedThread || !selectedThreadCwd) {
+        return null;
+      }
+
+      setPendingConnectionError(null);
+      const result = await execute({ thread: selectedThread, cwd: selectedThreadCwd });
+      if (AsyncResult.isFailure(result)) {
+        const error = Cause.squash(result.cause);
+        const message = error instanceof Error ? error.message : "Git action failed.";
+        setPendingConnectionError(message);
+        showGitActionResult({ type: "error", title: "Git action failed", description: message });
+        return null;
+      }
+      await refreshSelectedThreadGitStatus({ quiet: true });
+      return result.value;
+    },
+    [refreshSelectedThreadGitStatus, selectedThread, selectedThreadCwd],
+  );
+
+  const stageSelectedPaths = useCallback(
+    async (paths: ReadonlyArray<string>) => {
+      if (paths.length === 0) {
+        return null;
+      }
+      return runSelectedThreadVcsMutation(({ thread, cwd }) =>
+        stagePaths({
+          environmentId: thread.environmentId,
+          input: { cwd, paths },
+        }),
+      );
+    },
+    [runSelectedThreadVcsMutation, stagePaths],
+  );
+
+  const unstageSelectedPaths = useCallback(
+    async (paths: ReadonlyArray<string>) => {
+      if (paths.length === 0) {
+        return null;
+      }
+      return runSelectedThreadVcsMutation(({ thread, cwd }) =>
+        unstagePaths({
+          environmentId: thread.environmentId,
+          input: { cwd, paths },
+        }),
+      );
+    },
+    [runSelectedThreadVcsMutation, unstagePaths],
+  );
+
+  const discardSelectedPaths = useCallback(
+    async (paths: ReadonlyArray<string>) => {
+      if (paths.length === 0) {
+        return null;
+      }
+      return runSelectedThreadVcsMutation(({ thread, cwd }) =>
+        discardPaths({
+          environmentId: thread.environmentId,
+          input: { cwd, paths },
+        }),
+      );
+    },
+    [discardPaths, runSelectedThreadVcsMutation],
+  );
+
+  const stashPush = useCallback(async () => {
+    return runSelectedThreadVcsMutation(({ thread, cwd }) =>
+      stash({
+        environmentId: thread.environmentId,
+        input: { cwd, action: "push", includeUntracked: true },
+      }),
+    );
+  }, [runSelectedThreadVcsMutation, stash]);
+
+  const amendLastCommit = useCallback(
+    async (commitMessage?: string) => {
+      const trimmed = commitMessage?.trim();
+      return runSelectedThreadVcsMutation(({ thread, cwd }) =>
+        amendCommit({
+          environmentId: thread.environmentId,
+          input: {
+            cwd,
+            ...(trimmed ? { commitMessage: trimmed } : {}),
+          },
+        }),
+      );
+    },
+    [amendCommit, runSelectedThreadVcsMutation],
+  );
+
+  const undoLastCommitAction = useCallback(async () => {
+    return runSelectedThreadVcsMutation(({ thread, cwd }) =>
+      undoLastCommit({
+        environmentId: thread.environmentId,
+        input: { cwd },
+      }),
+    );
+  }, [runSelectedThreadVcsMutation, undoLastCommit]);
+
+  const syncBranch = useCallback(async () => {
+    const result = await runSelectedThreadVcsMutation(({ thread, cwd }) =>
+      sync({
+        environmentId: thread.environmentId,
+        input: { cwd },
+      }),
+    );
+    if (result !== null) {
+      showGitActionResult({
+        type: "success",
+        title:
+          result.pull.status === "skipped_up_to_date" && result.push.status === "skipped_up_to_date"
+            ? "Already up to date"
+            : "Synced branch with upstream",
+      });
+    }
+    return result;
+  }, [runSelectedThreadVcsMutation, sync]);
+
   const onPullSelectedThreadBranch = useCallback(async () => {
     await runSelectedThreadGitMutation(
       "pull",
@@ -382,5 +513,12 @@ export function useSelectedThreadGitActions() {
     onCreateSelectedThreadWorktree,
     onPullSelectedThreadBranch,
     onRunSelectedThreadGitAction,
+    stageSelectedPaths,
+    unstageSelectedPaths,
+    discardSelectedPaths,
+    stashPush,
+    amendLastCommit,
+    undoLastCommit: undoLastCommitAction,
+    syncBranch,
   };
 }

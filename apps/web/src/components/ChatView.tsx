@@ -119,7 +119,11 @@ import * as Schema from "effect/Schema";
 import { AsyncResult } from "effect/unstable/reactivity";
 import { isElectron } from "../env";
 import { readLocalApi } from "../localApi";
-import { useDiffPanelStore } from "../diffPanelStore";
+import {
+  selectThreadDiffPanelSelection,
+  shouldResetDiffSelectionOnGenericOpen,
+  useDiffPanelStore,
+} from "../diffPanelStore";
 import {
   collapseExpandedComposerCursor,
   type ComposerSubmissionIntent,
@@ -622,6 +626,7 @@ const PreviewPanel = lazy(() =>
   import("./preview/PreviewPanel").then((module) => ({ default: module.PreviewPanel })),
 );
 const DiffPanel = lazy(() => import("./DiffPanel"));
+const ChangesPanel = lazy(() => import("./ChangesPanel"));
 const selectAutoShowFloatingPreview = (settings: { browserAutoShowFloatingPreview: boolean }) =>
   settings.browserAutoShowFloatingPreview;
 const DevicePanel = lazy(() =>
@@ -2013,9 +2018,15 @@ export default function ChatView(props: ChatViewProps) {
     const explicitThreadRef = explicitDiffOpenRef.current;
     explicitDiffOpenRef.current = null;
     // Generic openings always show the checkout, including tab fallbacks and thread changes.
-    // A timeline click instead opens the specific turn/file the user requested.
+    // Timeline and Changes set a concrete turn/file before open(); keep those.
     if (diffOpen && activeThreadRef && explicitThreadRef !== activeThreadRef) {
-      useDiffPanelStore.getState().selectGitScope(activeThreadRef, "uncommitted");
+      const selection = selectThreadDiffPanelSelection(
+        useDiffPanelStore.getState().byThreadKey,
+        activeThreadRef,
+      );
+      if (shouldResetDiffSelectionOnGenericOpen(selection)) {
+        useDiffPanelStore.getState().selectGitScope(activeThreadRef, "uncommitted");
+      }
     }
   }, [activeThreadRef, diffOpen]);
   const rightPanelState = useRightPanelStore((state) =>
@@ -4611,6 +4622,10 @@ export default function ChatView(props: ChatViewProps) {
     useRightPanelStore.getState().open(activeThreadRef, "diff");
     onDiffPanelOpen?.();
   }, [activeThreadRef, diffSurfaceAvailable, onDiffPanelOpen]);
+  const addChangesSurface = useCallback(() => {
+    if (!activeThreadRef || !diffSurfaceAvailable) return;
+    useRightPanelStore.getState().open(activeThreadRef, "changes");
+  }, [activeThreadRef, diffSurfaceAvailable]);
   const addFilesSurface = useCallback(() => {
     if (!activeThreadRef || !activeProject) return;
     useRightPanelStore.getState().open(activeThreadRef, "files");
@@ -9697,6 +9712,14 @@ export default function ChatView(props: ChatViewProps) {
           workspaceMutationId={workspaceMutationId}
         />
       </Suspense>
+    ) : renderedRightPanelSurface?.kind === "changes" ? (
+      <Suspense fallback={null}>
+        <ChangesPanel
+          key={activeThreadKey}
+          mode="embedded"
+          workspaceMutationId={workspaceMutationId}
+        />
+      </Suspense>
     ) : renderedRightPanelSurface?.kind === "pull-request" && !pullRequestsCapabilityKnown ? (
       <PullRequestDetailGhost />
     ) : renderedRightPanelSurface?.kind === "pull-request" && !supportsPullRequests ? (
@@ -10411,6 +10434,7 @@ export default function ChatView(props: ChatViewProps) {
           onAddBrowserInProfile={createBrowserSurface}
           onAddTerminal={addTerminalSurface}
           onAddDiff={addDiffSurface}
+          onAddChanges={addChangesSurface}
           onAddFiles={addFilesSurface}
           onAddPullRequest={addPullRequestSurface}
           onAddPullRequests={addPullRequestsSurface}
@@ -10419,6 +10443,7 @@ export default function ChatView(props: ChatViewProps) {
           browserAvailable={isPreviewSupportedInRuntime()}
           terminalAvailable={activeProject !== null}
           diffAvailable={diffSurfaceAvailable}
+          changesAvailable={diffSurfaceAvailable}
           filesAvailable={activeProject !== null}
           pullRequestAvailable={pullRequestSurfaceAvailable}
           pullRequestsAvailable={pullRequestsSurfaceAvailable}
@@ -10468,6 +10493,7 @@ export default function ChatView(props: ChatViewProps) {
             onAddBrowserInProfile={createBrowserSurface}
             onAddTerminal={addTerminalSurface}
             onAddDiff={addDiffSurface}
+            onAddChanges={addChangesSurface}
             onAddFiles={addFilesSurface}
             onAddPullRequest={addPullRequestSurface}
             onAddPullRequests={addPullRequestsSurface}
@@ -10476,6 +10502,7 @@ export default function ChatView(props: ChatViewProps) {
             browserAvailable={isPreviewSupportedInRuntime()}
             terminalAvailable={activeProject !== null}
             diffAvailable={diffSurfaceAvailable}
+            changesAvailable={diffSurfaceAvailable}
             filesAvailable={activeProject !== null}
             pullRequestAvailable={pullRequestSurfaceAvailable}
             pullRequestsAvailable={pullRequestsSurfaceAvailable}

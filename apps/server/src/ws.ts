@@ -3347,6 +3347,86 @@ const makeWsRpcLayer = (
             ),
             { "rpc.aggregate": "git" },
           ),
+        [WS_METHODS.vcsPush]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.vcsPush,
+            gitWorkflow.pushCurrentBranch(input.cwd).pipe(
+              Effect.matchCauseEffect({
+                onFailure: (cause) => Effect.failCause(cause),
+                onSuccess: (result) =>
+                  refreshGitStatus(input.cwd).pipe(Effect.ignore({ log: true }), Effect.as(result)),
+              }),
+            ),
+            { "rpc.aggregate": "git" },
+          ),
+        [WS_METHODS.vcsSync]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.vcsSync,
+            gitWorkflow.syncCurrentBranch(input.cwd).pipe(
+              Effect.matchCauseEffect({
+                onFailure: (cause) => Effect.failCause(cause),
+                onSuccess: (result) =>
+                  refreshGitStatus(input.cwd).pipe(Effect.ignore({ log: true }), Effect.as(result)),
+              }),
+            ),
+            { "rpc.aggregate": "git" },
+          ),
+        [WS_METHODS.vcsStagePaths]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.vcsStagePaths,
+            gitWorkflow.stagePaths(input).pipe(Effect.tap(() => refreshGitStatus(input.cwd))),
+            { "rpc.aggregate": "vcs" },
+          ),
+        [WS_METHODS.vcsUnstagePaths]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.vcsUnstagePaths,
+            gitWorkflow.unstagePaths(input).pipe(Effect.tap(() => refreshGitStatus(input.cwd))),
+            { "rpc.aggregate": "vcs" },
+          ),
+        [WS_METHODS.vcsDiscardPaths]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.vcsDiscardPaths,
+            gitWorkflow.discardPaths(input).pipe(Effect.tap(() => refreshGitStatus(input.cwd))),
+            { "rpc.aggregate": "vcs" },
+          ),
+        [WS_METHODS.vcsStageHunk]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.vcsStageHunk,
+            gitWorkflow.stageHunk(input).pipe(Effect.tap(() => refreshGitStatus(input.cwd))),
+            { "rpc.aggregate": "vcs" },
+          ),
+        [WS_METHODS.vcsUnstageHunk]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.vcsUnstageHunk,
+            gitWorkflow.unstageHunk(input).pipe(Effect.tap(() => refreshGitStatus(input.cwd))),
+            { "rpc.aggregate": "vcs" },
+          ),
+        [WS_METHODS.vcsDiscardHunk]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.vcsDiscardHunk,
+            gitWorkflow.discardHunk(input).pipe(Effect.tap(() => refreshGitStatus(input.cwd))),
+            { "rpc.aggregate": "vcs" },
+          ),
+        [WS_METHODS.vcsStash]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.vcsStash,
+            gitWorkflow.stash(input).pipe(Effect.tap(() => refreshGitStatus(input.cwd))),
+            { "rpc.aggregate": "vcs" },
+          ),
+        [WS_METHODS.vcsAmendCommit]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.vcsAmendCommit,
+            gitWorkflow.amendCommit(input).pipe(Effect.tap(() => refreshGitStatus(input.cwd))),
+            { "rpc.aggregate": "vcs" },
+          ),
+        [WS_METHODS.vcsUndoLastCommit]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.vcsUndoLastCommit,
+            gitWorkflow
+              .undoLastCommit(input.cwd)
+              .pipe(Effect.tap(() => refreshGitStatus(input.cwd))),
+            { "rpc.aggregate": "vcs" },
+          ),
         [WS_METHODS.gitRunStackedAction]: (input) =>
           observeRpcStream(
             WS_METHODS.gitRunStackedAction,

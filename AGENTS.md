@@ -83,6 +83,22 @@ The most common defect in this repo is a change that works on the path you teste
 - To reuse web dev auth across worktrees, configure one fixed `T3CODE_DEV_AUTH_TOKEN` in the main checkout's gitignored `.env`. The `t3.json` setup links that file into worktrees. Never commit or publish the token or a startup URL. See [Reusable dev credential](docs/operations/development.md#reusable-dev-credential).
 - Stop what you started, by the PID you tracked. See rule 1.
 
+## Local desktop rebuild (no publish)
+
+Only when the developer asks to rebuild/reinstall the installed Mac app. This is not a release and does not push or publish anything.
+
+1. Use Node 24 from nvm (system Node 22 cannot run the `.ts` build scripts). Put it first on `PATH`, along with the repo's `node_modules/.bin`:
+   `export PATH="$HOME/.nvm/versions/node/v24.21.0/bin:$HOME/.cargo/bin:$PWD/node_modules/.bin:$PATH"`
+   (adjust the nvm version if a newer Node 24 is installed; cargo is required for the Mac native helpers).
+2. Build the arm64 DMG/zip with an explicit local version (reuse the current local version unless asked to bump):
+   `T3CODE_DESKTOP_VERSION=1.0.8 vp run dist:desktop:dmg:arm64`
+3. Install from the zip into `/Applications/T3 Code (Alpha).app`. Typical flow: back up the current app, `unzip` `release/T3-Code-<version>-arm64.zip` to a temp dir, replace the app with `ditto`, clear quarantine with `xattr -cr`.
+4. Run the long build in a shared T3 terminal (`terminal_open` / `terminal_write`), not a hidden background shell.
+5. Tell the developer to **Cmd+Q and reopen** — replacing the `.app` does not refresh an already-running instance. Confirm with:
+   `defaults read "/Applications/T3 Code (Alpha).app/Contents/Info" CFBundleShortVersionString`
+
+Do not publish, bump a public release, or commit packaging artifacts unless asked.
+
 ## Test data
 
 An empty database is a bad test. Seed your worktree's `.t3` with a copy of real data instead of pointing at live state:

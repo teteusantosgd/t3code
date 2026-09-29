@@ -34,6 +34,7 @@ import {
   NativeStackScreenOptions,
   nativeHeaderScrollEdgeEffects,
 } from "../../../native/StackHeader";
+import { showTextInputDialog } from "../../../components/ConfirmDialogHost";
 import { tryOpenExternalUrl } from "../../../lib/openExternalUrl";
 import { useEnvironmentQuery } from "../../../state/query";
 import { useThreadSelection } from "../../../state/use-thread-selection";
@@ -217,6 +218,48 @@ export function GitOverviewSheet(props: GitOverviewSheetProps) {
   );
 
   const behindCount = gitStatus.data?.behindCount ?? 0;
+  const aheadCount = gitStatus.data?.aheadCount ?? 0;
+  const showSyncRow = hasPrimaryRemote && isRepo && (aheadCount > 0 || behindCount > 0);
+
+  const onStashChanges = useCallback(() => {
+    void gitActions.stashPush();
+  }, [gitActions]);
+
+  const onAmendLastCommit = useCallback(() => {
+    const run = (message?: string) => {
+      void gitActions.amendLastCommit(message);
+    };
+    if (Platform.OS === "ios") {
+      Alert.prompt(
+        "Amend last commit",
+        "Leave blank to keep the current message.",
+        (message) => run(message ?? undefined),
+        "plain-text",
+      );
+      return;
+    }
+    showTextInputDialog({
+      title: "Amend last commit",
+      initialValue: "",
+      confirmText: "Amend",
+      onConfirm: (message) => run(message),
+    });
+  }, [gitActions]);
+
+  const onUndoLastCommit = useCallback(() => {
+    Alert.alert(
+      "Undo last commit?",
+      "The latest commit will be removed and its changes will return to your working tree.",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Undo commit",
+          style: "destructive",
+          onPress: () => void gitActions.undoLastCommit(),
+        },
+      ],
+    );
+  }, [gitActions]);
 
   // Deterministic pull-to-refresh state. Tying RefreshControl to the query's
   // isPending flag left the spinner stuck (the status query reports pending
@@ -275,6 +318,51 @@ export function GitOverviewSheet(props: GitOverviewSheetProps) {
               subtitle={`${behindCount} commit${behindCount === 1 ? "" : "s"} behind upstream`}
               disabled={busy || !isRepo}
               onPress={() => void gitActions.onPullSelectedThreadBranch()}
+            />
+          </>
+        ) : null}
+        {showSyncRow ? (
+          <>
+            {Platform.OS !== "android" ? <View className="ml-12 h-px bg-border" /> : null}
+            <SheetListRow
+              icon="arrow.clockwise"
+              title="Sync"
+              subtitle={[
+                aheadCount > 0 ? `${aheadCount} ahead` : null,
+                behindCount > 0 ? `${behindCount} behind` : null,
+              ]
+                .filter((part) => part !== null)
+                .join(" · ")}
+              disabled={busy || !isRepo}
+              onPress={() => void gitActions.syncBranch()}
+            />
+          </>
+        ) : null}
+        {isRepo ? (
+          <>
+            {Platform.OS !== "android" ? <View className="ml-12 h-px bg-border" /> : null}
+            <SheetListRow
+              icon="archivebox"
+              title="Stash changes"
+              subtitle="Save uncommitted work without committing"
+              disabled={busy}
+              onPress={onStashChanges}
+            />
+            {Platform.OS !== "android" ? <View className="ml-12 h-px bg-border" /> : null}
+            <SheetListRow
+              icon="checkmark.circle"
+              title="Amend last commit"
+              subtitle="Replace the latest commit with staged changes"
+              disabled={busy}
+              onPress={onAmendLastCommit}
+            />
+            {Platform.OS !== "android" ? <View className="ml-12 h-px bg-border" /> : null}
+            <SheetListRow
+              icon="arrow.uturn.backward"
+              title="Undo last commit"
+              subtitle="Remove the latest commit and keep the changes"
+              disabled={busy}
+              onPress={onUndoLastCommit}
             />
           </>
         ) : null}

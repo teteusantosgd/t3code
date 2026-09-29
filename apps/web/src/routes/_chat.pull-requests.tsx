@@ -2107,6 +2107,7 @@ function PullRequestsRouteView() {
             onAddBrowserInProfile={() => undefined}
             onAddTerminal={() => undefined}
             onAddDiff={() => undefined}
+            onAddChanges={() => undefined}
             onAddFiles={() => undefined}
             onAddPullRequest={() => undefined}
             onAddPullRequests={() => undefined}
@@ -2115,6 +2116,7 @@ function PullRequestsRouteView() {
             browserAvailable={false}
             terminalAvailable={false}
             diffAvailable={false}
+            changesAvailable={false}
             filesAvailable={false}
             pullRequestAvailable={false}
             pullRequestsAvailable={false}

@@ -33,11 +33,56 @@ import { gitCommandDuration } from "../observability/Metrics.ts";
 import {
   makeGitVcsDriverCore,
   parseGitCheckoutProgressLine,
+  parsePorcelainV2Changes,
   splitNullSeparatedGitStdoutPaths,
 } from "./GitVcsDriverCore.ts";
 import * as GitVcsDriver from "./GitVcsDriver.ts";
 
 const encodeGitCommandError = Schema.encodeEffect(Schema.fromJsonString(GitCommandError));
+
+describe("parsePorcelainV2Changes", () => {
+  const ordinary = (xy: string, filePath: string) =>
+    `1 ${xy} N... 100644 100644 100644 0000000 1111111 ${filePath}`;
+
+  it("maps index and worktree letters into staged and unstaged lists", () => {
+    const stdout = [
+      "# branch.head main",
+      ordinary("M.", "staged-only.ts"),
+      ordinary(".M", "unstaged-only.ts"),
+      ordinary("MM", "both.ts"),
+      ordinary("A.", "added.ts"),
+      ordinary(".D", "deleted-unstaged.ts"),
+      "? untracked.txt",
+    ].join("\n");
+
+    const { staged, unstaged } = parsePorcelainV2Changes(stdout);
+
+    assert.deepEqual(
+      staged.map((entry) => ({ path: entry.path, status: entry.status })),
+      [
+        { path: "staged-only.ts", status: "M" },
+        { path: "both.ts", status: "M" },
+        { path: "added.ts", status: "A" },
+      ],
+    );
+    assert.deepEqual(
+      unstaged.map((entry) => ({ path: entry.path, status: entry.status })),
+      [
+        { path: "unstaged-only.ts", status: "M" },
+        { path: "both.ts", status: "M" },
+        { path: "deleted-unstaged.ts", status: "D" },
+        { path: "untracked.txt", status: "?" },
+      ],
+    );
+  });
+
+  it("reports unmerged paths on the unstaged side", () => {
+    const stdout = "u UU N... 100644 100644 100644 100644 0000000 1111111 2222222 conflict.ts";
+    const { staged, unstaged } = parsePorcelainV2Changes(stdout);
+    assert.deepEqual(staged, []);
+    assert.deepEqual(unstaged, [{ path: "conflict.ts", status: "U" }]);
+  });
+});
 
 const ServerConfigLayer = ServerConfig.layerTest(process.cwd(), {
   prefix: "t3-git-vcs-driver-test-",
@@ -2080,6 +2125,42 @@ it.layer(TestLayer)("GitVcsDriver core integration", (it) => {
         // Combined net from HEAD: +2 insertions.
         assert.equal(file.insertions, 2);
         assert.equal(file.deletions, 0);
+        assert.deepEqual(status.staged.files, [
+          { path: "feature.ts", status: "M", insertions: 2, deletions: 0 },
+        ]);
+        assert.deepEqual(status.unstaged.files, [
+          { path: "feature.ts", status: "M", insertions: 2, deletions: 0 },
+        ]);
+      }),
+    );
+
+    it.effect("stagePaths and unstagePaths move files between staged and unstaged groups", () =>
+      Effect.gen(function* () {
+        const cwd = yield* makeTmpDir();
+        const driver = yield* GitVcsDriver.GitVcsDriver;
+        yield* initRepoWithCommit(cwd);
+        yield* writeTextFile(cwd, "tracked.txt", "one\n");
+        yield* writeTextFile(cwd, "other.txt", "other\n");
+
+        let status = yield* driver.statusDetails(cwd);
+        assert.equal(status.staged.files.length, 0);
+        assert.equal(status.unstaged.files.length, 2);
+
+        yield* driver.stagePaths(cwd, ["tracked.txt"]);
+        status = yield* driver.statusDetails(cwd);
+        assert.deepEqual(
+          status.staged.files.map((file) => ({ path: file.path, status: file.status })),
+          [{ path: "tracked.txt", status: "A" }],
+        );
+        assert.deepEqual(
+          status.unstaged.files.map((file) => ({ path: file.path, status: file.status })),
+          [{ path: "other.txt", status: "?" }],
+        );
+
+        yield* driver.unstagePaths(cwd, ["tracked.txt"]);
+        status = yield* driver.statusDetails(cwd);
+        assert.equal(status.staged.files.length, 0);
+        assert.equal(status.unstaged.files.length, 2);
       }),
     );
 

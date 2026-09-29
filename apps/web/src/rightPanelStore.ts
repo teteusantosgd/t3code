@@ -21,6 +21,7 @@ import { resolveStorage } from "./lib/storage";
 
 const RIGHT_PANEL_KINDS = [
   "diff",
+  "changes",
   "files",
   "file",
   "preview",
@@ -52,6 +53,7 @@ export type RightPanelSurface =
       splitDirection?: "horizontal" | "vertical";
     }
   | { id: "diff"; kind: "diff" }
+  | { id: "changes"; kind: "changes" }
   | { id: "files"; kind: "files" }
   | {
       id: `file:${string}` | `attachment:${string}`;
@@ -92,7 +94,8 @@ const RIGHT_PANEL_STORAGE_KEY = "t3code:right-panel-state:v2";
 // v10 keys pull-request surfaces by reference instead of a singleton tab.
 // v11 stops persisting the pull-request list's shared panel, so a restart opens the page fresh.
 // v12 adds the device surface.
-const RIGHT_PANEL_STORAGE_VERSION = 13;
+// v13 adds the changes source-control surface.
+const RIGHT_PANEL_STORAGE_VERSION = 14;
 
 /** A fixed workspace-level ref: each PR surface carries its own real environment. */
 export const PULL_REQUESTS_PANEL_REF = scopeThreadRef(
@@ -185,6 +188,8 @@ const singletonSurface = (
   switch (kind) {
     case "diff":
       return { id: "diff", kind };
+    case "changes":
+      return { id: "changes", kind };
     case "files":
       return { id: "files", kind };
     case "pull-requests":
