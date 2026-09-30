@@ -181,6 +181,10 @@ export default function DiffPanel({
       : null,
   );
   const activeCwd = activeThread?.worktreePath ?? activeProject?.workspaceRoot;
+  const checkpointRepositoryRoot =
+    activeThread?.worktreePath ??
+    activeProject?.repoRoots?.[0] ??
+    activeProject?.repositoryIdentity?.rootPath;
   const activeRepositoryRoot = activeThread?.worktreePath
     ? undefined
     : activeProject?.repositoryIdentity?.rootPath;
@@ -327,7 +331,7 @@ export default function DiffPanel({
       ignoreWhitespace: diffIgnoreWhitespace,
       cacheScope: selectedTurn ? `turn:${selectedTurn.turnId}` : null,
     },
-    { enabled: isGitRepo && selectedTurn !== undefined },
+    { enabled: (isGitRepo || hasConfiguredRepositories) && selectedTurn !== undefined },
   );
   const primaryBranchDiffPreview = useEnvironmentQuery(
     selectedTurnId === null && activeThread && activeCwd
@@ -842,11 +846,28 @@ export default function DiffPanel({
 
   const openDiffFile = useCallback(
     (filePath: string) => {
+      const matchingRepository =
+        hasConfiguredRepositories && repositories.length > 0
+          ? [...repositories]
+              .filter((repository) => repository.available)
+              .toSorted((left, right) => right.path.length - left.path.length)
+              .find(
+                (repository) =>
+                  repository.path === "." ||
+                  repository.path === "" ||
+                  filePath === repository.path ||
+                  filePath.startsWith(`${repository.path}/`) ||
+                  filePath.startsWith(`${repository.cwd}/`),
+              )
+          : null;
       openDiffFilePrimaryAction({
         threadRef: routeThreadRef,
         filePath,
         activeCwd,
-        repositoryRoot: activeRepositoryRoot,
+        repositoryRoot:
+          selectedTurnId !== null
+            ? checkpointRepositoryRoot
+            : (matchingRepository?.cwd ?? activeRepositoryRoot),
         openInEditor: (targetPath) => {
           void (async () => {
             const result = await openInPreferredEditor(targetPath);
@@ -866,7 +887,16 @@ export default function DiffPanel({
         },
       });
     },
-    [activeCwd, activeRepositoryRoot, openInPreferredEditor, routeThreadRef],
+    [
+      activeCwd,
+      activeRepositoryRoot,
+      checkpointRepositoryRoot,
+      selectedTurnId,
+      hasConfiguredRepositories,
+      openInPreferredEditor,
+      repositories,
+      routeThreadRef,
+    ],
   );
   const toggleDiffFileCollapsed = useCallback(
     (fileKey: string) => {
@@ -957,7 +987,8 @@ export default function DiffPanel({
             >
               <span className="truncate">
                 {selectedTurnId !== null
-                  ? "Workspace"
+                  ? (repositories.find((repository) => repository.cwd === checkpointRepositoryRoot)
+                      ?.name ?? "Workspace")
                   : (filteredRepository?.name ??
                     (repositoryFilter === null ? "All repos" : repositoryFilter))}
               </span>
@@ -1303,11 +1334,9 @@ export default function DiffPanel({
         <div className="flex flex-1 items-center justify-center px-5 text-center text-xs text-muted-foreground/70">
           Select a thread to inspect turn diffs.
         </div>
-      ) : !isGitRepo && (selectedTurnId !== null || !hasConfiguredRepositories) ? (
+      ) : !isGitRepo && !hasConfiguredRepositories ? (
         <div className="flex flex-1 items-center justify-center px-5 text-center text-xs text-muted-foreground/70">
-          {hasConfiguredRepositories
-            ? "Turn diffs are unavailable because the workspace root is not a git repository. Choose Uncommitted to review configured repositories."
-            : "Turn diffs are unavailable because this project is not a git repository."}
+          Turn diffs are unavailable because this project is not a git repository.
         </div>
       ) : selectedTurnId !== null && orderedTurnDiffSummaries.length === 0 ? (
         <div className="flex flex-1 items-center justify-center px-5 text-center text-xs text-muted-foreground/70">
@@ -1359,11 +1388,24 @@ export default function DiffPanel({
                 />
               ) : (
                 <div className="flex h-full items-center justify-center px-3 py-2 text-xs text-muted-foreground/70">
-                  <p>
-                    {hasNoNetChanges
-                      ? "No net changes in this selection."
-                      : "No patch available for this selection."}
-                  </p>
+                  <div className="max-w-sm space-y-2 text-center">
+                    <p>
+                      {hasNoNetChanges
+                        ? selectedTurn
+                          ? "No net changes in this selection."
+                          : `No ${selectedGitScope === "branch" ? "branch" : gitScopeLabel(selectedGitScope).toLowerCase()} changes in this selection.`
+                        : "No patch available for this selection."}
+                    </p>
+                    {hasNoNetChanges && !selectedTurn && selectedGitScope !== "branch" && (
+                      <p>
+                        {selectedGitScope === "staged"
+                          ? "Stage files in Changes to include them here."
+                          : selectedGitScope === "unstaged"
+                            ? "Staged changes are shown under Staged. Committed changes are shown under Branch changes or a turn."
+                            : "Committed changes are shown under Branch changes or a turn."}
+                      </p>
+                    )}
+                  </div>
                 </div>
               )
             ) : lazySource || renderablePatch?.kind === "files" ? (
@@ -1415,7 +1457,8 @@ export default function DiffPanel({
                         environmentId: activeThread?.environmentId ?? null,
                         filePath,
                         workspaceRoot: activeCwd,
-                        repositoryRoot: activeRepositoryRoot,
+                        repositoryRoot:
+                          selectedTurnId !== null ? checkpointRepositoryRoot : activeRepositoryRoot,
                       },
                       event,
                     );

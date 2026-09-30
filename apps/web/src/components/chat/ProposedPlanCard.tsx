@@ -39,12 +39,14 @@ export const ProposedPlanCard = memo(function ProposedPlanCard({
   threadRef,
   cwd,
   workspaceRoot,
+  repoRoots = null,
 }: {
   planMarkdown: string;
   environmentId: EnvironmentId;
   threadRef?: ScopedThreadRef | undefined;
   cwd: string | undefined;
   workspaceRoot: string | undefined;
+  repoRoots?: ReadonlyArray<string> | null;
 }) {
   const [expanded, setExpanded] = useState(false);
   const [isSaveDialogOpen, setIsSaveDialogOpen] = useState(false);
@@ -177,6 +179,8 @@ export const ProposedPlanCard = memo(function ProposedPlanCard({
             <ChatMarkdown
               text={collapsedPreview ?? ""}
               cwd={cwd}
+              workspaceRoot={workspaceRoot}
+              repoRoots={repoRoots}
               threadRef={threadRef}
               isStreaming={false}
               headingLevelOffset={3}
@@ -185,6 +189,8 @@ export const ProposedPlanCard = memo(function ProposedPlanCard({
             <ChatMarkdown
               text={displayedPlanMarkdown}
               cwd={cwd}
+              workspaceRoot={workspaceRoot}
+              repoRoots={repoRoots}
               threadRef={threadRef}
               isStreaming={false}
               headingLevelOffset={3}

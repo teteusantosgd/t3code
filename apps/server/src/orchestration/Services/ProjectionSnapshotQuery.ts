@@ -51,6 +51,7 @@ export interface ProjectionThreadCheckpointContext {
   readonly threadId: ThreadId;
   readonly projectId: ProjectId;
   readonly workspaceRoot: string;
+  readonly repoRoots?: ReadonlyArray<string>;
   readonly worktreePath: string | null;
   readonly checkpoints: ReadonlyArray<OrchestrationCheckpointSummary>;
 }
@@ -59,6 +60,7 @@ export interface ProjectionFullThreadDiffContext {
   readonly threadId: ThreadId;
   readonly projectId: ProjectId;
   readonly workspaceRoot: string;
+  readonly repoRoots?: ReadonlyArray<string>;
   readonly worktreePath: string | null;
   readonly latestCheckpointTurnCount: number;
   readonly toCheckpointRef: CheckpointRef | null;

@@ -79,6 +79,36 @@ describe("openDiffFilePrimaryAction", () => {
     ).toBe("frontend/Dockerfile");
   });
 
+  it("prefixes the full nested-repo offset under a non-git workspace (#12902)", () => {
+    expect(
+      resolveDiffPathForWorkspace({
+        filePath: "lms-platform/web/backoffice/values.yaml.gotmpl",
+        workspaceRoot: "E:\\Work\\FinBeat",
+        repositoryRoot: "E:\\Work\\FinBeat\\Kubernetes\\kubernetes-pak-cl-dev",
+      }),
+    ).toBe("Kubernetes/kubernetes-pak-cl-dev/lms-platform/web/backoffice/values.yaml.gotmpl");
+  });
+
+  it("keeps an already-prefixed nested-repo path", () => {
+    expect(
+      resolveDiffPathForWorkspace({
+        filePath: "Sanvitron.Parking.Retro/.scratch/issues/01-simplificacao-da-garagem-local.md",
+        workspaceRoot: "/Users/dev/Projects/Sanvitron",
+        repositoryRoot: "/Users/dev/Projects/Sanvitron/Sanvitron.Parking.Retro",
+      }),
+    ).toBe("Sanvitron.Parking.Retro/.scratch/issues/01-simplificacao-da-garagem-local.md");
+  });
+
+  it("opens absolute nested-repo paths as workspace-relative tree paths", () => {
+    expect(
+      resolveDiffPathForWorkspace({
+        filePath: "/Users/dev/Projects/Sanvitron/Sanvitron.Parking.Retro/.scratch/issues/01.md",
+        workspaceRoot: "/Users/dev/Projects/Sanvitron",
+        repositoryRoot: "/Users/dev/Projects/Sanvitron/Sanvitron.Parking.Retro",
+      }),
+    ).toBe("Sanvitron.Parking.Retro/.scratch/issues/01.md");
+  });
+
   it("handles Windows roots and mixed diff separators", () => {
     expect(
       resolveDiffPathForWorkspace({

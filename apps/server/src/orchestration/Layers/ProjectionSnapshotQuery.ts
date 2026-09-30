@@ -259,6 +259,7 @@ const ProjectionThreadCheckpointContextThreadRowSchema = Schema.Struct({
   threadId: ThreadId,
   projectId: ProjectId,
   workspaceRoot: Schema.String,
+  repoRoots: Schema.NullOr(Schema.fromJsonString(Schema.Array(Schema.String))),
   worktreePath: Schema.NullOr(Schema.String),
 });
 const FullThreadDiffContextLookupInput = Schema.Struct({
@@ -269,6 +270,7 @@ const ProjectionFullThreadDiffContextRowSchema = Schema.Struct({
   threadId: ThreadId,
   projectId: ProjectId,
   workspaceRoot: Schema.String,
+  repoRoots: Schema.NullOr(Schema.fromJsonString(Schema.Array(Schema.String))),
   worktreePath: Schema.NullOr(Schema.String),
   latestCheckpointTurnCount: Schema.NullOr(NonNegativeInt),
   toCheckpointRef: Schema.NullOr(CheckpointRef),
@@ -1239,6 +1241,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           threads.thread_id AS "threadId",
           threads.project_id AS "projectId",
           projects.workspace_root AS "workspaceRoot",
+          projects.repo_roots_json AS "repoRoots",
           threads.worktree_path AS "worktreePath"
         FROM projection_threads AS threads
         INNER JOIN projection_projects AS projects
@@ -2047,6 +2050,7 @@ pending_approval_requests AS (
           threads.thread_id AS "threadId",
           threads.project_id AS "projectId",
           projects.workspace_root AS "workspaceRoot",
+          projects.repo_roots_json AS "repoRoots",
           threads.worktree_path AS "worktreePath",
           (
             SELECT MAX(turns.checkpoint_turn_count)
@@ -3165,6 +3169,7 @@ pending_approval_requests AS (
         threadId: threadRow.value.threadId,
         projectId: threadRow.value.projectId,
         workspaceRoot: threadRow.value.workspaceRoot,
+        repoRoots: threadRow.value.repoRoots ?? [],
         worktreePath: threadRow.value.worktreePath,
         checkpoints: checkpointRows.map((row): OrchestrationCheckpointSummary => ({
           turnId: row.turnId,
@@ -3201,6 +3206,7 @@ pending_approval_requests AS (
         threadId: row.value.threadId,
         projectId: row.value.projectId,
         workspaceRoot: row.value.workspaceRoot,
+        repoRoots: row.value.repoRoots ?? [],
         worktreePath: row.value.worktreePath,
         latestCheckpointTurnCount: row.value.latestCheckpointTurnCount ?? 0,
         toCheckpointRef: row.value.toCheckpointRef,

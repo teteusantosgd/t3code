@@ -926,6 +926,8 @@ it.layer(GitManagerTestLayer)("GitManager", (it) => {
           insertions: 0,
           deletions: 0,
         },
+        staged: { files: [], insertions: 0, deletions: 0 },
+        unstaged: { files: [], insertions: 0, deletions: 0 },
         hasUpstream: false,
         aheadCount: 0,
         behindCount: 0,
@@ -956,6 +958,8 @@ it.layer(GitManagerTestLayer)("GitManager", (it) => {
           insertions: 0,
           deletions: 0,
         },
+        staged: { files: [], insertions: 0, deletions: 0 },
+        unstaged: { files: [], insertions: 0, deletions: 0 },
         hasUpstream: false,
         aheadCount: 0,
         behindCount: 0,
@@ -2800,6 +2804,96 @@ it.layer(GitManagerTestLayer)("GitManager", (it) => {
 
       const second = yield* manager.status({ cwd: repoDir });
       expect(second.pr?.number).toBe(217);
+    }),
+  );
+
+  it.effect("generates a message without committing or changing staging", () =>
+    Effect.gen(function* () {
+      const repoDir = yield* makeTempDir("t3code-git-message-");
+      yield* initRepo(repoDir);
+      NodeFS.writeFileSync(NodePath.join(repoDir, "README.md"), "hello\nstaged content\n");
+      yield* runGit(repoDir, ["add", "README.md"]);
+      NodeFS.appendFileSync(NodePath.join(repoDir, "README.md"), "unstaged content\n");
+      NodeFS.writeFileSync(NodePath.join(repoDir, "new.txt"), "untracked content\n");
+      const beforeHead = (yield* runGit(repoDir, ["rev-parse", "HEAD"])).stdout;
+      const beforeIndex = NodeFS.readFileSync(NodePath.join(repoDir, ".git/index"));
+      const beforeStatus = (yield* runGit(repoDir, ["status", "--porcelain"])).stdout;
+      const inputs: TextGeneration.CommitMessageGenerationInput[] = [];
+      const { manager } = yield* makeManager({
+        textGeneration: {
+          generateCommitMessage: (input) => {
+            inputs.push(input);
+            return Effect.succeed({ subject: "Describe changes", body: "Explain the changes." });
+          },
+        },
+      });
+
+      const stagedMessage = yield* manager.generateCommitMessage({ cwd: repoDir, scope: "staged" });
+      expect(stagedMessage).toEqual({
+        message: "Describe changes\n\nExplain the changes.",
+      });
+      expect(inputs[0]?.stagedPatch).toContain("staged content");
+      expect(inputs[0]?.stagedPatch).not.toContain("unstaged content");
+      expect(inputs[0]?.stagedPatch).not.toContain("untracked content");
+
+      yield* manager.generateCommitMessage({ cwd: repoDir, scope: "all" });
+      expect(inputs[1]?.stagedPatch).toContain("unstaged content");
+      expect(inputs[1]?.stagedPatch).toContain("untracked content");
+      expect((yield* runGit(repoDir, ["rev-parse", "HEAD"])).stdout).toBe(beforeHead);
+      expect(NodeFS.readFileSync(NodePath.join(repoDir, ".git/index"))).toEqual(beforeIndex);
+      expect((yield* runGit(repoDir, ["status", "--porcelain"])).stdout).toBe(beforeStatus);
+      expect(NodeFS.readFileSync(NodePath.join(repoDir, "README.md"), "utf8")).toBe(
+        "hello\nstaged content\nunstaged content\n",
+      );
+    }),
+  );
+
+  it.effect("does not generate a commit message for an empty selection", () =>
+    Effect.gen(function* () {
+      const repoDir = yield* makeTempDir("t3code-git-message-");
+      yield* initRepo(repoDir);
+      NodeFS.appendFileSync(NodePath.join(repoDir, "README.md"), "unstaged only\n");
+      let calls = 0;
+      const { manager } = yield* makeManager({
+        textGeneration: {
+          generateCommitMessage: () => {
+            calls++;
+            return Effect.succeed({ subject: "Unused", body: "" });
+          },
+        },
+      });
+      const result = yield* manager.generateCommitMessage({ cwd: repoDir, scope: "staged" });
+      expect(result).toEqual({
+        message: null,
+      });
+      expect(calls).toBe(0);
+    }),
+  );
+
+  it.effect("leaves the repository unchanged when message generation fails", () =>
+    Effect.gen(function* () {
+      const repoDir = yield* makeTempDir("t3code-git-message-");
+      yield* initRepo(repoDir);
+      NodeFS.appendFileSync(NodePath.join(repoDir, "README.md"), "pending change\n");
+      const beforeHead = (yield* runGit(repoDir, ["rev-parse", "HEAD"])).stdout;
+      const beforeIndex = NodeFS.readFileSync(NodePath.join(repoDir, ".git/index"));
+      const { manager } = yield* makeManager({
+        textGeneration: {
+          generateCommitMessage: () =>
+            Effect.fail(
+              new TextGenerationError({
+                operation: "generateCommitMessage",
+                detail: "Provider unavailable",
+              }),
+            ),
+        },
+      });
+      const result = yield* manager
+        .generateCommitMessage({ cwd: repoDir, scope: "all" })
+        .pipe(Effect.result);
+      expect(result._tag).toBe("Failure");
+      expect((yield* runGit(repoDir, ["rev-parse", "HEAD"])).stdout).toBe(beforeHead);
+      expect(NodeFS.readFileSync(NodePath.join(repoDir, ".git/index"))).toEqual(beforeIndex);
     }),
   );
 

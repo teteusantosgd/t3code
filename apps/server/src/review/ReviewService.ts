@@ -18,6 +18,7 @@ import {
 import * as ServerConfig from "../config.ts";
 import * as GitVcsDriver from "../vcs/GitVcsDriver.ts";
 import * as VcsDriverRegistry from "../vcs/VcsDriverRegistry.ts";
+import { WorkspaceAuthorizedRoots } from "../workspace/WorkspaceAuthorizedRoots.ts";
 
 export class ReviewService extends Context.Service<
   ReviewService,
@@ -38,6 +39,7 @@ export const make = Effect.gen(function* () {
   const path = yield* Path.Path;
   const vcsRegistry = yield* VcsDriverRegistry.VcsDriverRegistry;
   const git = yield* GitVcsDriver.GitVcsDriver;
+  const authorizedRoots = yield* WorkspaceAuthorizedRoots;
 
   const canonicalizePath = (value: string) => {
     const resolvedPath = path.resolve(value);
@@ -74,6 +76,26 @@ export const make = Effect.gen(function* () {
     ]);
 
     if (isWithinRoot(candidate, workspaceRoot) || isWithinRoot(candidate, worktreesRoot)) {
+      return;
+    }
+
+    const configuredRoot = yield* authorizedRoots.ensureFilesCwdAuthorized(cwd).pipe(
+      Effect.as(true),
+      Effect.catchTags({
+        WorkspaceCwdNotAuthorizedError: () => Effect.succeed(false),
+        WorkspaceAuthorizedRootsLoadError: (cause) =>
+          Effect.fail(
+            new VcsRepositoryDetectionError({
+              operation,
+              cwd,
+              detail:
+                "Failed to load configured workspace roots while validating the review workspace.",
+              cause,
+            }),
+          ),
+      }),
+    );
+    if (configuredRoot) {
       return;
     }
 

@@ -1,5 +1,6 @@
 import { useParams } from "@tanstack/react-router";
-import type { EnvironmentId, VcsChangedFile, VcsStatusResult } from "@t3tools/contracts";
+import type { EnvironmentId, ThreadId, VcsChangedFile, VcsStatusResult } from "@t3tools/contracts";
+import { AsyncResult } from "effect/unstable/reactivity";
 import {
   ChevronDownIcon,
   ChevronRightIcon,
@@ -13,7 +14,7 @@ import {
   Trash2Icon,
 } from "lucide-react";
 import { RefreshIcon } from "~/components/ui/refresh-icon";
-import { useCallback, useMemo, type ReactNode } from "react";
+import { useCallback, useMemo, useState, type ReactNode } from "react";
 
 import {
   changesExpandedFileKey,
@@ -38,6 +39,8 @@ import { useRightPanelStore } from "~/rightPanelStore";
 import { useEnvironmentQuery } from "~/state/query";
 import { useProject, useThread } from "~/state/entities";
 import { vcsEnvironment } from "~/state/vcs";
+import { gitEnvironment } from "~/state/git";
+import { useAtomCommand } from "~/state/use-atom-command";
 import { resolveThreadRouteRef } from "~/threadRoutes";
 import { randomUUID } from "~/lib/utils";
 
@@ -276,6 +279,7 @@ function ChangesFileList(props: {
 function RepositoryChangesCard(props: {
   model: RepositoryCardModel;
   environmentId: EnvironmentId;
+  threadId: ThreadId;
   listLayout: "list" | "tree";
   theme: "light" | "dark";
   collapsed: boolean;
@@ -298,6 +302,35 @@ function RepositoryChangesCard(props: {
   const canCommit =
     model.isRepo && (stagedCount > 0 || (model.status?.hasWorkingTreeChanges ?? false));
   const changeCount = stagedCount + unstagedCount;
+  const [isGeneratingMessage, setIsGeneratingMessage] = useState(false);
+  const [generationNotice, setGenerationNotice] = useState<string | null>(null);
+  const generateCommitMessage = useAtomCommand(gitEnvironment.generateCommitMessage, {
+    label: "Generate commit message",
+  });
+  const handleGenerateMessage = async () => {
+    if (isGeneratingMessage || props.runCommit.isPending || !canCommit) return;
+    setIsGeneratingMessage(true);
+    setGenerationNotice(null);
+    try {
+      const result = await generateCommitMessage({
+        environmentId,
+        input: {
+          cwd: model.cwd,
+          scope: stagedCount > 0 ? "staged" : "all",
+          threadId: props.threadId,
+        },
+      });
+      if (AsyncResult.isSuccess(result)) {
+        if (result.value.message === null) {
+          setGenerationNotice("No local changes to generate a commit message.");
+        } else {
+          props.onCommitMessageChange(result.value.message);
+        }
+      }
+    } finally {
+      setIsGeneratingMessage(false);
+    }
+  };
 
   const runPathsAction = useCallback(
     (kind: "stage" | "unstage" | "discard", paths: ReadonlyArray<string>) => {
@@ -510,6 +543,7 @@ function RepositoryChangesCard(props: {
               <div className="relative">
                 <Textarea
                   value={props.commitMessage}
+                  disabled={isGeneratingMessage}
                   onChange={(event) => props.onCommitMessageChange(event.target.value)}
                   placeholder="Message (leave empty to auto-generate)"
                   rows={3}
@@ -523,24 +557,35 @@ function RepositoryChangesCard(props: {
                         variant="ghost"
                         size="icon-xs"
                         className="absolute end-1.5 top-1.5"
-                        aria-label="Generate commit message"
-                        disabled={!canCommit || props.runCommit.isPending}
-                        onClick={() => {
-                          props.onCommitMessageChange("");
-                          handleCommit(stagedCount > 0 ? "staged" : "all");
-                        }}
+                        aria-label={
+                          isGeneratingMessage
+                            ? "Generating commit message"
+                            : "Generate commit message"
+                        }
+                        disabled={!canCommit || props.runCommit.isPending || isGeneratingMessage}
+                        onClick={() => void handleGenerateMessage()}
                       >
-                        <SparklesIcon className="size-3.5" />
+                        {isGeneratingMessage ? (
+                          <Spinner size="sm" />
+                        ) : (
+                          <SparklesIcon className="size-3.5" />
+                        )}
                       </Button>
                     }
                   />
-                  <TooltipPopup>Generate message and commit</TooltipPopup>
+                  <TooltipPopup>Generate commit message</TooltipPopup>
                 </Tooltip>
               </div>
+              {generationNotice ? (
+                <p role="status" className="text-xs text-muted-foreground">
+                  {generationNotice}
+                </p>
+              ) : null}
               <div className="flex gap-1">
                 <Button
+                  size="xs"
                   className="min-w-0 flex-1"
-                  disabled={!canCommit || props.runCommit.isPending}
+                  disabled={!canCommit || props.runCommit.isPending || isGeneratingMessage}
                   onClick={() => handleCommit(stagedCount > 0 ? "staged" : "all")}
                 >
                   {props.runCommit.isPending
@@ -554,11 +599,11 @@ function RepositoryChangesCard(props: {
                     render={
                       <Button
                         variant="default"
-                        size="icon"
-                        disabled={!canCommit || props.runCommit.isPending}
+                        size="icon-xs"
+                        disabled={!canCommit || props.runCommit.isPending || isGeneratingMessage}
                         aria-label="More commit options"
                       >
-                        <ChevronDownIcon className="size-4" />
+                        <ChevronDownIcon className="size-3.5" />
                       </Button>
                     }
                   />
@@ -590,6 +635,7 @@ function RepositoryChangesCard(props: {
 function RepositoryChangesCardContainer(props: {
   model: RepositoryCardModel;
   environmentId: EnvironmentId;
+  threadId: ThreadId;
   listLayout: "list" | "tree";
   theme: "light" | "dark";
   collapsed: boolean;
@@ -609,6 +655,7 @@ function RepositoryChangesCardContainer(props: {
     <RepositoryChangesCard
       model={props.model}
       environmentId={props.environmentId}
+      threadId={props.threadId}
       listLayout={props.listLayout}
       theme={props.theme}
       collapsed={props.collapsed}
@@ -795,12 +842,13 @@ export default function ChangesPanel({
             repositoryCards.map((model) => {
               const repositoryKey = model.cwd;
               const commitMessage = panelState.commitMessageByRepositoryKey[repositoryKey] ?? "";
-              if (environmentId === null) return null;
+              if (environmentId === null || !activeThread) return null;
               return (
                 <RepositoryChangesCardContainer
-                  key={model.cwd}
+                  key={`${environmentId}:${activeThread.id}:${model.cwd}`}
                   model={model}
                   environmentId={environmentId}
+                  threadId={activeThread.id}
                   listLayout={panelState.listLayout}
                   theme={resolvedTheme}
                   collapsed={panelState.collapsedRepositoryKeys[repositoryKey] === true}

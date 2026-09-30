@@ -100,6 +100,18 @@ export type GitResolvedPullRequest = typeof GitResolvedPullRequest.Type;
 
 // RPC Inputs
 
+export const GitGenerateCommitMessageInput = Schema.Struct({
+  cwd: TrimmedNonEmptyStringSchema,
+  scope: Schema.Literals(["staged", "all"]),
+  threadId: Schema.optional(ThreadId),
+});
+export type GitGenerateCommitMessageInput = typeof GitGenerateCommitMessageInput.Type;
+
+export const GitGenerateCommitMessageResult = Schema.Struct({
+  message: Schema.NullOr(TrimmedNonEmptyStringSchema),
+});
+export type GitGenerateCommitMessageResult = typeof GitGenerateCommitMessageResult.Type;
+
 export const VcsStatusInput = Schema.Struct({
   cwd: TrimmedNonEmptyStringSchema,
 });

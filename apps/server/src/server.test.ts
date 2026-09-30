@@ -166,6 +166,7 @@ import * as ServerEnvironment from "./environment/ServerEnvironment.ts";
 import * as WorkspaceAuthorizedRoots from "./workspace/WorkspaceAuthorizedRoots.ts";
 import * as WorkspaceEntries from "./workspace/WorkspaceEntries.ts";
 import * as WorkspaceFileSystem from "./workspace/WorkspaceFileSystem.ts";
+import * as CodeWorkspaceFile from "./workspace/CodeWorkspaceFile.ts";
 import * as WorkspacePaths from "./workspace/WorkspacePaths.ts";
 import * as GitVcsDriver from "./vcs/GitVcsDriver.ts";
 import * as VcsDriver from "./vcs/VcsDriver.ts";
@@ -722,6 +723,7 @@ const buildAppUnderTest = (options?: {
     );
     const workspaceAndProjectServicesLayer = Layer.mergeAll(
       WorkspacePaths.layer,
+      CodeWorkspaceFile.layer,
       workspaceAuthorizedRootsTestLayer,
       workspaceEntriesLayer,
       WorkspaceFileSystem.layer.pipe(
@@ -748,6 +750,7 @@ const buildAppUnderTest = (options?: {
           ...options.layers.reviewService,
         })
       : ReviewService.layer.pipe(
+          Layer.provide(workspaceAuthorizedRootsTestLayer),
           Layer.provideMerge(gitVcsDriverLayer),
           Layer.provide(vcsDriverRegistryLayer),
         );
@@ -7758,6 +7761,56 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       );
 
       assertFailure(result, externalLauncherError);
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect("routes message generation without running a commit", () =>
+    Effect.gen(function* () {
+      const inputs: unknown[] = [];
+      const refreshedCwds: string[] = [];
+      let commitCalls = 0;
+      yield* buildAppUnderTest({
+        config: { cwd: "/tmp/repo" },
+        layers: {
+          vcsDriver: { isInsideWorkTree: () => Effect.succeed(true) },
+          vcsStatusBroadcaster: {
+            refreshLocalStatus: (cwd) =>
+              Effect.sync(() => {
+                refreshedCwds.push(cwd);
+                return {
+                  isRepo: true,
+                  hasPrimaryRemote: true,
+                  isDefaultRef: true,
+                  refName: "main",
+                  hasWorkingTreeChanges: false,
+                  workingTree: { files: [], insertions: 0, deletions: 0 },
+                  staged: { files: [], insertions: 0, deletions: 0 },
+                  unstaged: { files: [], insertions: 0, deletions: 0 },
+                };
+              }),
+          },
+          gitManager: {
+            generateCommitMessage: (input) => {
+              inputs.push(input);
+              return Effect.succeed({ message: "Describe changes\n\nGenerated body." });
+            },
+            runStackedAction: () => {
+              commitCalls++;
+              return Effect.die("Must not commit while generating a message");
+            },
+          },
+        },
+      });
+      const wsUrl = yield* getWsServerUrl("/ws");
+      const result = yield* Effect.scoped(
+        withWsRpcClient(wsUrl, (client) =>
+          client[WS_METHODS.gitGenerateCommitMessage]({ cwd: "/tmp/repo", scope: "staged" }),
+        ),
+      );
+      assert.deepEqual(result, { message: "Describe changes\n\nGenerated body." });
+      assert.deepEqual(inputs, [{ cwd: "/tmp/repo", scope: "staged" }]);
+      assert.deepEqual(refreshedCwds, ["/tmp/repo"]);
+      assert.equal(commitCalls, 0);
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 

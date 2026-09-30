@@ -8,12 +8,17 @@ import * as PlatformError from "effect/PlatformError";
 import { ServerConfig } from "../config.ts";
 import * as GitVcsDriver from "../vcs/GitVcsDriver.ts";
 import * as VcsDriverRegistry from "../vcs/VcsDriverRegistry.ts";
+import {
+  WorkspaceAuthorizedRoots,
+  WorkspaceCwdNotAuthorizedError,
+} from "../workspace/WorkspaceAuthorizedRoots.ts";
 import * as ReviewService from "./ReviewService.ts";
 
 function makeLayer(input: {
   readonly workspaceRoot: string;
   readonly baseDir: string;
   readonly detectCalls?: Array<{ readonly cwd: string }>;
+  readonly authorizedRoots?: ReadonlyArray<string>;
 }) {
   return ReviewService.layer.pipe(
     Layer.provide(
@@ -28,12 +33,54 @@ function makeLayer(input: {
       }),
     ),
     Layer.provide(Layer.mock(GitVcsDriver.GitVcsDriver)({})),
+    Layer.provide(
+      Layer.mock(WorkspaceAuthorizedRoots)({
+        ensureFilesCwdAuthorized: (cwd) =>
+          input.authorizedRoots?.includes(cwd)
+            ? Effect.void
+            : Effect.fail(new WorkspaceCwdNotAuthorizedError({ cwd, normalizedCwd: cwd })),
+      }),
+    ),
     Layer.provide(ServerConfig.layerTest(input.workspaceRoot, input.baseDir)),
     Layer.provideMerge(NodeServices.layer),
   );
 }
 
 describe("ReviewService", () => {
+  it.effect(
+    "allows previews and file contents for a configured repository outside the server cwd",
+    () =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const workspaceRoot = yield* fs.makeTempDirectoryScoped({ prefix: "t3-review-server-" });
+        const repoRoot = yield* fs.makeTempDirectoryScoped({ prefix: "t3-review-project-" });
+        const baseDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-review-base-" });
+        const detectCalls: Array<{ readonly cwd: string }> = [];
+        yield* Effect.gen(function* () {
+          const review = yield* ReviewService.ReviewService;
+          const preview = yield* review.getDiffPreview({ cwd: repoRoot });
+          assert.strictEqual(preview.cwd, repoRoot);
+          const error = yield* review
+            .getDiffFileContents({
+              cwd: repoRoot,
+              sourceKind: "working-tree",
+              changeType: "change",
+              baseRef: "HEAD",
+              headRef: null,
+              oldPath: "file.ts",
+              newPath: "file.ts",
+            })
+            .pipe(Effect.flip);
+          assert.strictEqual(error._tag, "VcsUnsupportedOperationError");
+        }).pipe(
+          Effect.provide(
+            makeLayer({ workspaceRoot, baseDir, detectCalls, authorizedRoots: [repoRoot] }),
+          ),
+        );
+        assert.deepStrictEqual(detectCalls, [{ cwd: repoRoot }, { cwd: repoRoot }]);
+      }).pipe(Effect.provide(NodeServices.layer)),
+  );
+
   it.effect("rejects diff preview cwd outside the configured workspace roots", () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;

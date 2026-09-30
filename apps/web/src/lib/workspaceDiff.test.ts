@@ -1,7 +1,75 @@
 import type { FileDiffMetadata } from "@pierre/diffs";
+import { EnvironmentId, type ReviewDiffPreviewSourceKind } from "@t3tools/contracts";
+import { AsyncResult } from "effect/unstable/reactivity";
 import { describe, expect, it } from "vite-plus/test";
 
-import { filterWorkspaceDiffRepositories, includeWorkspaceDiffFile } from "./workspaceDiff";
+import {
+  createWorkspaceDiff,
+  filterWorkspaceDiffRepositories,
+  includeWorkspaceDiffFile,
+} from "./workspaceDiff";
+
+describe("createWorkspaceDiff", () => {
+  for (const kind of [
+    "working-tree",
+    "staged",
+    "unstaged",
+    "branch-range",
+  ] satisfies ReviewDiffPreviewSourceKind[]) {
+    it(`aggregates ${kind} files with the same name and keeps expansion in the correct repository`, async () => {
+      const entries = ["repo-a", "repo-b"].map((name) => ({
+        repository: { path: name, name, cwd: `/workspace/${name}`, available: true },
+        source: {
+          id: kind,
+          kind,
+          title: kind,
+          baseRef: "HEAD",
+          headRef: null,
+          diff: `diff --git a/shared.txt b/shared.txt\nindex 7898192..6178079 100644\n--- a/shared.txt\n+++ b/shared.txt\n@@ -1 +1 @@\n-before\n+after ${name}\n`,
+          diffHash: `${name}-${kind}`,
+          truncated: false,
+        },
+      }));
+      const calls: Array<{
+        cwd: string;
+        sourceKind: ReviewDiffPreviewSourceKind;
+        oldPath: string;
+        newPath: string;
+      }> = [];
+      const diff = createWorkspaceDiff(
+        entries,
+        EnvironmentId.make("test"),
+        async ({ input }) => {
+          calls.push(input);
+          return AsyncResult.success({
+            oldContents: "before\n",
+            newContents: `after ${input.cwd}\n`,
+          });
+        },
+        "dark",
+      );
+      expect(diff.files.map((file) => file.name)).toEqual([
+        "repo-a/shared.txt",
+        "repo-b/shared.txt",
+      ]);
+      expect(diff.warnings).toEqual([]);
+      for (const file of diff.files) {
+        const contents = await diff.loadDiffFiles(file);
+        expect(contents.newFile.name).toEqual(file.name);
+      }
+      expect(calls).toEqual(
+        entries.map(({ repository }) =>
+          expect.objectContaining({
+            cwd: repository.cwd,
+            sourceKind: kind,
+            oldPath: "shared.txt",
+            newPath: "shared.txt",
+          }),
+        ),
+      );
+    });
+  }
+});
 
 describe("filterWorkspaceDiffRepositories", () => {
   const repositories = [

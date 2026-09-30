@@ -273,6 +273,7 @@ interface TimelineRowSharedState {
   markdownCwd: string | undefined;
   resolvedTheme: "light" | "dark";
   workspaceRoot: string | undefined;
+  repoRoots: ReadonlyArray<string> | null;
   skills: ReadonlyArray<Pick<ServerProviderSkill, "name" | "displayName">>;
   activeThreadEnvironmentId: EnvironmentId;
   onRevertToTurnCount: (targetTurnCount: number, messageId: MessageId) => void;
@@ -436,6 +437,7 @@ interface MessagesTimelineProps {
   resolvedTheme: "light" | "dark";
   timestampFormat: TimestampFormat;
   workspaceRoot: string | undefined;
+  repoRoots?: ReadonlyArray<string> | null;
   skills?: ReadonlyArray<Pick<ServerProviderSkill, "name" | "displayName">>;
   anchorMessageId: MessageId | null;
   onAnchorReady: (messageId: MessageId, anchorIndex: number) => void;
@@ -506,6 +508,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   resolvedTheme,
   timestampFormat,
   workspaceRoot,
+  repoRoots = null,
   skills = EMPTY_TIMELINE_SKILLS,
   anchorMessageId,
   onAnchorReady,
@@ -1137,6 +1140,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       markdownCwd,
       resolvedTheme,
       workspaceRoot,
+      repoRoots,
       skills,
       activeThreadEnvironmentId,
       onRevertToTurnCount,
@@ -1173,6 +1177,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       markdownCwd,
       resolvedTheme,
       workspaceRoot,
+      repoRoots,
       skills,
       activeThreadEnvironmentId,
       onRevertToTurnCount,
@@ -2371,6 +2376,8 @@ function AssistantTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "mess
           <ChatMarkdown
             text={messageText}
             cwd={ctx.markdownCwd}
+            workspaceRoot={ctx.workspaceRoot}
+            repoRoots={ctx.repoRoots}
             threadRef={ctx.threadRef ?? undefined}
             isStreaming={Boolean(row.message.streaming)}
             lineBreaks={shouldPreserveAssistantLineBreaks(messageText)}
@@ -2499,6 +2506,7 @@ function ProposedPlanTimelineRow({
         threadRef={ctx.threadRef ?? undefined}
         cwd={ctx.markdownCwd}
         workspaceRoot={ctx.workspaceRoot}
+        repoRoots={ctx.repoRoots}
       />
     </div>
   );
@@ -2789,6 +2797,8 @@ function ReasoningTraceBlock({
               className="text-foreground"
               text={reasoningMessage.text}
               cwd={ctx.markdownCwd}
+              workspaceRoot={ctx.workspaceRoot}
+              repoRoots={ctx.repoRoots}
               threadRef={ctx.threadRef ?? undefined}
               isStreaming={streaming && reasoningMessage.streaming}
               lineBreaks
@@ -2857,6 +2867,8 @@ const ReasoningTimelineRow = memo(function ReasoningTimelineRow({
             className="text-foreground"
             text={message.text}
             cwd={ctx.markdownCwd}
+            workspaceRoot={ctx.workspaceRoot}
+            repoRoots={ctx.repoRoots}
             threadRef={ctx.threadRef ?? undefined}
             lineBreaks
             skills={ctx.skills}
@@ -3994,6 +4006,8 @@ const UserMessageBody = memo(function UserMessageBody(props: {
     <ChatMarkdown
       text={props.text}
       cwd={props.markdownCwd}
+      workspaceRoot={ctx.workspaceRoot}
+      repoRoots={ctx.repoRoots}
       threadRef={ctx.threadRef ?? undefined}
       skills={props.skills}
       className="text-message-foreground"
@@ -4032,6 +4046,8 @@ function UserMessageReviewCommentCard({ comment }: { comment: ReviewCommentConte
         <ChatMarkdown
           text={formatReviewCommentFence(fenceLanguage, comment.diff)}
           cwd={ctx.markdownCwd}
+          workspaceRoot={ctx.workspaceRoot}
+          repoRoots={ctx.repoRoots}
           threadRef={ctx.threadRef ?? undefined}
           skills={ctx.skills}
           className="text-message-foreground"

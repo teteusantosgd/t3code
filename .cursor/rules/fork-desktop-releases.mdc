@@ -1,0 +1,15 @@
+---
+description: Fork desktop release hygiene for teteusantosgd/t3code
+alwaysApply: true
+---
+
+# Fork desktop releases (local + GitHub)
+
+When building or publishing a desktop release for the **fork** (`teteusantosgd/t3code`), not upstream:
+
+1. After a successful new version lands (local `release/` artifacts and/or a GitHub release on the fork), **keep only the two most recent versions**. Delete older ones.
+2. **Local artifacts:** prune `release/T3-Code-*` (and `*.blockmap`, `builder-debug.yml`) so only the latest two version prefixes remain.
+3. **App backups:** also prune versioned `.app` copies under `~/t3-backup-*` (e.g. `T3 Code (Alpha) <version>.app`) and `/Applications/T3 Code (Alpha).app.bak`, keeping only the two newest versioned apps. Do **not** delete userdata in those folders (`state.sqlite`, `secrets`, settings, logs).
+4. **GitHub fork:** `gh release delete <old-tag> -R teteusantosgd/t3code --yes --cleanup-tag` for tags older than the latest two.
+5. Do **not** delete upstream (`pingdotgg/t3code`) releases.
+6. Do this cleanup as part of finishing the release work — do not leave old DMGs/EXEs/app backups accumulating on disk.

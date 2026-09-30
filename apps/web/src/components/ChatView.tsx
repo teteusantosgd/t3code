@@ -477,6 +477,7 @@ import {
   timelineHasEphemeralPreviewUrls,
   observeProactivePanelUserChoice,
   resolveProactiveTurnDiffAction,
+  shouldPreserveDiffSelectionWhileOpen,
   resolveThreadMetadataUpdateForNextTurn,
   resolveSendEnvMode,
   isDiffSurfaceAvailable,
@@ -3673,9 +3674,13 @@ export default function ChatView(props: ChatViewProps) {
     panelAnimationDurationMs,
   );
 
+  // Match server `resolveThreadWorkspaceCwd`: agents in a code-workspace project
+  // launch in the first repo folder, so relative markdown links resolve there.
   const gitCwd = activeProject
     ? projectScriptCwd({
-        project: { cwd: activeProject.workspaceRoot },
+        project: {
+          cwd: activeProject.repoRoots?.[0] ?? activeProject.workspaceRoot,
+        },
         worktreePath: activeThread?.worktreePath ?? null,
       })
     : null;
@@ -3767,9 +3772,16 @@ export default function ChatView(props: ChatViewProps) {
       threadKey: activeThreadKey,
       entries: timelineEntries,
       markdownCwd: gitCwd,
-      workspaceRoot: activeWorkspaceRoot ?? null,
+      workspaceRoot: activeProject?.workspaceRoot ?? activeWorkspaceRoot ?? null,
     });
-  }, [activeThreadKey, activeWorkspaceRoot, gitCwd, threadDetailLoading, timelineEntries]);
+  }, [
+    activeThreadKey,
+    activeProject?.workspaceRoot,
+    activeWorkspaceRoot,
+    gitCwd,
+    threadDetailLoading,
+    timelineEntries,
+  ]);
   const heldPaintContext = paintOnlyDisplayedTimeline
     ? peekHeldThreadTimeline<typeof timelineEntries>()
     : null;
@@ -4890,6 +4902,8 @@ export default function ChatView(props: ChatViewProps) {
         diffAction === "defer" || shouldDeferLink ? previousRunningTurnId : activeRunningTurnId,
     };
     if (diffAction !== "open" || newlyCompletedTurnId === null) return;
+    // Diff already open: keep Working tree / Branch / Turn selection intact.
+    if (shouldPreserveDiffSelectionWhileOpen(diffOpen)) return;
     if (!panels.openProactive(activeThreadRef, { id: "diff", kind: "diff" }, userActionRevision)) {
       return;
     }
@@ -4903,6 +4917,7 @@ export default function ChatView(props: ChatViewProps) {
     activeThreadKey,
     activeThreadRef,
     clientSettingsHydrated,
+    diffOpen,
     gitStatusQuery.data?.isRepo,
     isServerThread,
     latestTurnSettled,
@@ -10027,8 +10042,9 @@ export default function ChatView(props: ChatViewProps) {
                 workspaceRoot={
                   paintOnlyDisplayedTimeline
                     ? (heldPaintContext?.workspaceRoot ?? undefined)
-                    : activeWorkspaceRoot
+                    : (activeProject?.workspaceRoot ?? activeWorkspaceRoot)
                 }
+                repoRoots={activeProject?.repoRoots ?? null}
                 skills={
                   activeProviderStatus
                     ? resolveProviderSkillsForCwd(activeProviderStatus, gitCwd)

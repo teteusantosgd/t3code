@@ -3467,6 +3467,20 @@ const makeWsRpcLayer = (
             ),
             { "rpc.aggregate": "vcs" },
           ),
+        [WS_METHODS.gitGenerateCommitMessage]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.gitGenerateCommitMessage,
+            gitWorkflow
+              .generateCommitMessage(input)
+              .pipe(
+                Effect.tap(() =>
+                  vcsStatusBroadcaster
+                    .refreshLocalStatus(input.cwd)
+                    .pipe(Effect.ignoreCause({ log: true })),
+                ),
+              ),
+            { "rpc.aggregate": "git" },
+          ),
         [WS_METHODS.gitResolvePullRequest]: (input) =>
           observeRpcEffect(
             WS_METHODS.gitResolvePullRequest,

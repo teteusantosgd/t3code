@@ -84,6 +84,7 @@ import {
   shouldOpenProactivePullRequest,
   shouldRetargetThreadPullRequestPanel,
   shouldOpenProactiveTurnDiff,
+  shouldPreserveDiffSelectionWhileOpen,
   shouldRenderPreviewMiniPlayer,
   shouldShowBranchMismatchBanner,
   shouldShowPlanFollowUpPrompt,
@@ -444,6 +445,11 @@ describe("proactive panels", () => {
         isGitRepo: undefined,
       }),
     ).toBe("defer");
+  });
+
+  it("preserves Diff scope selection while the Diff surface is already open", () => {
+    expect(shouldPreserveDiffSelectionWhileOpen(true)).toBe(true);
+    expect(shouldPreserveDiffSelectionWhileOpen(false)).toBe(false);
   });
 });
 

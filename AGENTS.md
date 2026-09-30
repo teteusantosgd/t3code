@@ -99,6 +99,8 @@ Only when the developer asks to rebuild/reinstall the installed Mac app. This is
 
 Do not publish, bump a public release, or commit packaging artifacts unless asked.
 
+When publishing a **fork** desktop release (`teteusantosgd/t3code`), keep only the **two most recent** versions everywhere we accumulate builds: `release/` artifacts, GitHub fork tags, and versioned `.app` backups under `~/t3-backup-*` (plus `/Applications/T3 Code (Alpha).app.bak`). Never delete userdata in those backup folders, and never delete upstream releases.
+
 ## Test data
 
 An empty database is a bad test. Seed your worktree's `.t3` with a copy of real data instead of pointing at live state:

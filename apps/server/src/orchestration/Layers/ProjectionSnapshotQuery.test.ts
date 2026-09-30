@@ -560,6 +560,8 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
           autoPull: false,
           faviconPath: null,
           projectIcon: null,
+          workspaceFile: null,
+          repoRoots: [],
           scripts: [
             {
               id: "script-1",
@@ -1522,6 +1524,7 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
           threadId: ThreadId.make("thread-context"),
           projectId: asProjectId("project-context"),
           workspaceRoot: "/tmp/context-workspace",
+          repoRoots: [],
           worktreePath: "/tmp/context-worktree",
           checkpoints: [
             {
@@ -1544,6 +1547,26 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
             },
           ],
         });
+      }
+      yield* sql`UPDATE projection_projects
+        SET repo_roots_json = '["/tmp/context-workspace/repos/primary", "/tmp/secondary"]'
+        WHERE project_id = 'project-context'`;
+      const updated = yield* snapshotQuery.getThreadCheckpointContext(
+        ThreadId.make("thread-context"),
+      );
+      const full = yield* snapshotQuery.getFullThreadDiffContext(
+        ThreadId.make("thread-context"),
+        2,
+      );
+      for (const context of [Option.getOrNull(updated), Option.getOrNull(full)]) {
+        assert.isNotNull(context);
+        if (context !== null) {
+          assert.equal(context.workspaceRoot, "/tmp/context-workspace");
+          assert.deepEqual(context.repoRoots, [
+            "/tmp/context-workspace/repos/primary",
+            "/tmp/secondary",
+          ]);
+        }
       }
     }),
   );

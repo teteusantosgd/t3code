@@ -56,6 +56,8 @@ import {
 } from "./worktreeSetup.ts";
 import {
   GitActionProgressEvent,
+  GitGenerateCommitMessageInput,
+  GitGenerateCommitMessageResult,
   VcsSwitchRefInput,
   VcsSwitchRefResult,
   GitCommandError,
@@ -349,6 +351,7 @@ export const WS_METHODS = {
 
   // Git workflow methods
   gitRunStackedAction: "git.runStackedAction",
+  gitGenerateCommitMessage: "git.generateCommitMessage",
   gitResolvePullRequest: "git.resolvePullRequest",
   gitPreparePullRequestThread: "git.preparePullRequestThread",
 
@@ -1131,6 +1134,12 @@ const WsWorktreeSetupCancelRpc = Rpc.make(WS_METHODS.worktreeSetupCancel, {
   error: EnvironmentAuthorizationError,
 });
 
+const WsGitGenerateCommitMessageRpc = Rpc.make(WS_METHODS.gitGenerateCommitMessage, {
+  payload: GitGenerateCommitMessageInput,
+  success: GitGenerateCommitMessageResult,
+  error: Schema.Union([GitManagerServiceError, EnvironmentAuthorizationError]),
+});
+
 const WsGitRunStackedActionRpc = Rpc.make(WS_METHODS.gitRunStackedAction, {
   payload: GitRunStackedActionInput,
   success: GitActionProgressEvent,
@@ -1588,6 +1597,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsVcsAmendCommitRpc,
   WsVcsUndoLastCommitRpc,
   WsGitRunStackedActionRpc,
+  WsGitGenerateCommitMessageRpc,
   WsGitResolvePullRequestRpc,
   WsGitPreparePullRequestThreadRpc,
   WsVcsListRefsRpc,

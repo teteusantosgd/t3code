@@ -194,6 +194,15 @@ export function resolveProactiveTurnDiffAction(input: {
   return input.checkpoint.files.length >= 3 || changedLines >= 50 ? "open" : "ignore";
 }
 
+/**
+ * When Diff is already open, leave the scope selector alone. The developer is
+ * usually inspecting Working tree / Branch / a turn; proactive completion must
+ * not yank the menu to Uncommitted (upstream #13593 / #10150 neighborhood).
+ */
+export function shouldPreserveDiffSelectionWhileOpen(diffAlreadyOpen: boolean): boolean {
+  return diffAlreadyOpen;
+}
+
 export function codexArtifactTemplatePromptToAppend(
   currentDraft: string,
   template: CodexArtifactTemplate,

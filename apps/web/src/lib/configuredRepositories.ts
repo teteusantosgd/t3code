@@ -68,24 +68,54 @@ export function expandConfiguredRepositoryPaths(
   return [...expanded];
 }
 
+/**
+ * Map absolute `repoRoots` into Diff repositories. `path` must be the full
+ * workspace-relative offset (including intermediate directories), not the repo
+ * basename and not the absolute cwd — Diff prefixes git-relative file paths with
+ * `path`, then opens them against the workspace root (#12902).
+ */
 export function repositoriesFromRepoRoots(
   repoRoots: ReadonlyArray<string>,
+  workspaceRoot?: string | null,
 ): ConfiguredDiffRepository[] {
   const repositories: ConfiguredDiffRepository[] = [];
   const seenCwds = new Set<string>();
+  const normalizedWorkspace = workspaceRoot
+    ? workspaceRoot.trim().replace(/\\/g, "/").replace(/\/+$/, "")
+    : "";
 
   for (const cwd of repoRoots) {
     const normalized = cwd.trim().replace(/\\/g, "/").replace(/\/+$/, "");
     if (!normalized || seenCwds.has(normalized)) continue;
     seenCwds.add(normalized);
+    const relativePath =
+      normalizedWorkspace.length > 0
+        ? workspaceRelativeRepositoryPath(normalizedWorkspace, normalized)
+        : null;
     repositories.push({
-      path: normalized,
+      path: relativePath ?? basename(normalized),
       name: basename(normalized),
       cwd: normalized,
     });
   }
 
   return repositories;
+}
+
+/** Relative path from workspace root to a nested repo, or null when outside/equal. */
+export function workspaceRelativeRepositoryPath(
+  workspaceRoot: string,
+  repositoryRoot: string,
+): string | null {
+  const workspace = workspaceRoot.trim().replace(/\\/g, "/").replace(/\/+$/, "");
+  const repository = repositoryRoot.trim().replace(/\\/g, "/").replace(/\/+$/, "");
+  if (!workspace || !repository) return null;
+  if (repository === workspace) return ".";
+  const caseInsensitive = /^[A-Za-z]:/.test(workspace);
+  const workspaceKey = caseInsensitive ? workspace.toLowerCase() : workspace;
+  const repositoryKey = caseInsensitive ? repository.toLowerCase() : repository;
+  if (!repositoryKey.startsWith(`${workspaceKey}/`)) return null;
+  return repository.slice(workspace.length + 1);
 }
 
 export function configuredDiffRepositories(input: {

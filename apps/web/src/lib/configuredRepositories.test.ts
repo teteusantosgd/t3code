@@ -42,10 +42,42 @@ describe("configuredRepositories", () => {
     ).toEqual(["apps/web", "apps/api", "Services"]);
   });
 
-  it("maps absolute repo roots to diff repositories with unique cwds", () => {
-    expect(repositoriesFromRepoRoots(["/work/repo-a", "/work/repo-b", "/work/repo-a/"])).toEqual([
-      { path: "/work/repo-a", name: "repo-a", cwd: "/work/repo-a" },
-      { path: "/work/repo-b", name: "repo-b", cwd: "/work/repo-b" },
+  it("maps absolute repo roots to workspace-relative diff paths", () => {
+    expect(
+      repositoriesFromRepoRoots(
+        [
+          "/Users/dev/Projects/Sanvitron/Sanvitron.Parking.Retro",
+          "/Users/dev/Projects/Sanvitron/wssanvipark",
+          "/Users/dev/Projects/Sanvitron/Sanvitron.Parking.Retro/",
+        ],
+        "/Users/dev/Projects/Sanvitron",
+      ),
+    ).toEqual([
+      {
+        path: "Sanvitron.Parking.Retro",
+        name: "Sanvitron.Parking.Retro",
+        cwd: "/Users/dev/Projects/Sanvitron/Sanvitron.Parking.Retro",
+      },
+      {
+        path: "wssanvipark",
+        name: "wssanvipark",
+        cwd: "/Users/dev/Projects/Sanvitron/wssanvipark",
+      },
+    ]);
+  });
+
+  it("keeps intermediate directories for nested repo roots under the workspace (#12902)", () => {
+    expect(
+      repositoriesFromRepoRoots(
+        ["E:/Work/FinBeat/Kubernetes/kubernetes-pak-cl-dev"],
+        "E:/Work/FinBeat",
+      ),
+    ).toEqual([
+      {
+        path: "Kubernetes/kubernetes-pak-cl-dev",
+        name: "kubernetes-pak-cl-dev",
+        cwd: "E:/Work/FinBeat/Kubernetes/kubernetes-pak-cl-dev",
+      },
     ]);
   });
 

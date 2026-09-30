@@ -39,217 +39,248 @@ function makeThreadCheckpointContext(input: {
 }
 
 describe("CheckpointDiffQuery.layer", () => {
-  it.effect("uses the narrow full-thread context lookup for all-turns diffs", () =>
-    Effect.gen(function* () {
-      const projectId = ProjectId.make("project-full-thread");
-      const threadId = ThreadId.make("thread-full-thread");
-      const toCheckpointRef = checkpointRefForThreadTurn(threadId, 4);
-      let getThreadCheckpointContextCalls = 0;
-      let getFullThreadDiffContextCalls = 0;
-      const diffCheckpointsCalls: Array<{
-        readonly fromCheckpointRef: CheckpointRef;
-        readonly toCheckpointRef: CheckpointRef;
-        readonly cwd: string;
-        readonly ignoreWhitespace: boolean;
-      }> = [];
+  for (const worktreePath of [null, "/tmp/worktree"]) {
+    it.effect(`uses the checkpoint repository for all-turns diffs, worktree=${worktreePath}`, () =>
+      Effect.gen(function* () {
+        const projectId = ProjectId.make("project-full-thread");
+        const threadId = ThreadId.make("thread-full-thread");
+        const toCheckpointRef = checkpointRefForThreadTurn(threadId, 4);
+        let getThreadCheckpointContextCalls = 0;
+        let getFullThreadDiffContextCalls = 0;
+        const diffCheckpointsCalls: Array<{
+          readonly fromCheckpointRef: CheckpointRef;
+          readonly toCheckpointRef: CheckpointRef;
+          readonly cwd: string;
+          readonly ignoreWhitespace: boolean;
+        }> = [];
 
-      const checkpointStore: CheckpointStore.CheckpointStore["Service"] = {
-        isGitRepository: () => Effect.succeed(true),
-        captureCheckpoint: () => Effect.void,
-        hasCheckpointRef: () => Effect.succeed(true),
-        restoreCheckpoint: () => Effect.succeed(true),
-        diffCheckpoints: ({ fromCheckpointRef, toCheckpointRef, cwd, ignoreWhitespace }) =>
-          Effect.sync(() => {
-            diffCheckpointsCalls.push({
-              fromCheckpointRef,
-              toCheckpointRef,
-              cwd,
-              ignoreWhitespace,
-            });
-            return "full thread diff patch";
-          }),
-        deleteCheckpointRefs: () => Effect.void,
-      };
+        const checkpointStore: CheckpointStore.CheckpointStore["Service"] = {
+          isGitRepository: () => Effect.succeed(true),
+          captureCheckpoint: () => Effect.void,
+          hasCheckpointRef: () => Effect.succeed(true),
+          restoreCheckpoint: () => Effect.succeed(true),
+          diffCheckpoints: ({ fromCheckpointRef, toCheckpointRef, cwd, ignoreWhitespace }) =>
+            Effect.sync(() => {
+              diffCheckpointsCalls.push({
+                fromCheckpointRef,
+                toCheckpointRef,
+                cwd,
+                ignoreWhitespace,
+              });
+              return "full thread diff patch";
+            }),
+          deleteCheckpointRefs: () => Effect.void,
+        };
 
-      const layer = CheckpointDiffQuery.layer.pipe(
-        Layer.provideMerge(Layer.succeed(CheckpointStore.CheckpointStore, checkpointStore)),
-        Layer.provideMerge(
-          Layer.succeed(ProjectionSnapshotQuery.ProjectionSnapshotQuery, {
-            getUserInputActivity: () => Effect.die("unused"),
-            listActivitiesByKind: () => Effect.die("unused"),
-            getCommandReadModel: () =>
-              Effect.die("CheckpointDiffQuery should not request the command read model"),
-            getSnapshot: () =>
-              Effect.die("CheckpointDiffQuery should not request the full orchestration snapshot"),
-            getShellSnapshot: () =>
-              Effect.die("CheckpointDiffQuery should not request the orchestration shell snapshot"),
-            getDeletedWorktreeThreads: () => Effect.die("unused"),
-            getArchivedShellSnapshot: () =>
-              Effect.die("CheckpointDiffQuery should not request archived shell snapshots"),
-            getSnapshotSequence: () => Effect.succeed({ snapshotSequence: 0 }),
-            getCounts: () => Effect.succeed({ projectCount: 0, threadCount: 0 }),
-            getEventReplayStats: () => Effect.die("unused"),
-            getActiveProjectByWorkspaceRoot: () => Effect.succeed(Option.none()),
-            getProjectShells: () => Effect.die("unused"),
-            getProjectShellById: () => Effect.succeed(Option.none()),
-            getFirstActiveThreadIdByProjectId: () => Effect.succeed(Option.none()),
-            getImportedAgentSessionSources: () => Effect.die("unused"),
-            getThreadCheckpointContext: () =>
-              Effect.sync(() => {
-                getThreadCheckpointContextCalls += 1;
-                return Option.none();
-              }),
-            getFullThreadDiffContext: () =>
-              Effect.sync(() => {
-                getFullThreadDiffContextCalls += 1;
-                return Option.some({
-                  threadId,
-                  projectId,
-                  workspaceRoot: "/tmp/workspace",
-                  worktreePath: "/tmp/worktree",
-                  latestCheckpointTurnCount: 4,
-                  toCheckpointRef,
-                });
-              }),
-            getThreadRuntimeContext: () => Effect.die("unused"),
-            getTurnStartMessage: () => Effect.die("unused"),
-            getThreadShellById: () => Effect.succeed(Option.none()),
-            getThreadDetailById: () => Effect.succeed(Option.none()),
-            getThreadDetailSnapshot: () => Effect.succeed(Option.none()),
-            searchThreads: () => Effect.succeed({ matches: [] }),
-          }),
-        ),
-      );
+        const layer = CheckpointDiffQuery.layer.pipe(
+          Layer.provideMerge(Layer.succeed(CheckpointStore.CheckpointStore, checkpointStore)),
+          Layer.provideMerge(
+            Layer.succeed(ProjectionSnapshotQuery.ProjectionSnapshotQuery, {
+              getUserInputActivity: () => Effect.die("unused"),
+              listActivitiesByKind: () => Effect.die("unused"),
+              getCommandReadModel: () =>
+                Effect.die("CheckpointDiffQuery should not request the command read model"),
+              getSnapshot: () =>
+                Effect.die(
+                  "CheckpointDiffQuery should not request the full orchestration snapshot",
+                ),
+              getShellSnapshot: () =>
+                Effect.die(
+                  "CheckpointDiffQuery should not request the orchestration shell snapshot",
+                ),
+              getDeletedWorktreeThreads: () => Effect.die("unused"),
+              getArchivedShellSnapshot: () =>
+                Effect.die("CheckpointDiffQuery should not request archived shell snapshots"),
+              getSnapshotSequence: () => Effect.succeed({ snapshotSequence: 0 }),
+              getCounts: () => Effect.succeed({ projectCount: 0, threadCount: 0 }),
+              getEventReplayStats: () => Effect.die("unused"),
+              getActiveProjectByWorkspaceRoot: () => Effect.succeed(Option.none()),
+              getProjectShells: () => Effect.die("unused"),
+              getProjectShellById: () => Effect.succeed(Option.none()),
+              getFirstActiveThreadIdByProjectId: () => Effect.succeed(Option.none()),
+              getImportedAgentSessionSources: () => Effect.die("unused"),
+              getThreadCheckpointContext: () =>
+                Effect.sync(() => {
+                  getThreadCheckpointContextCalls += 1;
+                  return Option.none();
+                }),
+              getFullThreadDiffContext: () =>
+                Effect.sync(() => {
+                  getFullThreadDiffContextCalls += 1;
+                  return Option.some({
+                    threadId,
+                    projectId,
+                    workspaceRoot: "/tmp/workspace",
+                    worktreePath,
+                    repoRoots: ["/tmp/workspace/repos/primary", "/tmp/workspace/secondary"],
+                    latestCheckpointTurnCount: 4,
+                    toCheckpointRef,
+                  });
+                }),
+              getThreadRuntimeContext: () => Effect.die("unused"),
+              getTurnStartMessage: () => Effect.die("unused"),
+              getThreadShellById: () => Effect.succeed(Option.none()),
+              getThreadDetailById: () => Effect.succeed(Option.none()),
+              getThreadDetailSnapshot: () => Effect.succeed(Option.none()),
+              searchThreads: () => Effect.succeed({ matches: [] }),
+            }),
+          ),
+        );
 
-      const result = yield* Effect.gen(function* () {
-        const query = yield* CheckpointDiffQuery.CheckpointDiffQuery;
-        return yield* query.getFullThreadDiff({
+        const result = yield* Effect.gen(function* () {
+          const query = yield* CheckpointDiffQuery.CheckpointDiffQuery;
+          return yield* query.getFullThreadDiff({
+            threadId,
+            toTurnCount: 4,
+            ignoreWhitespace: true,
+          });
+        }).pipe(Effect.provide(layer));
+
+        expect(getThreadCheckpointContextCalls).toBe(0);
+        expect(getFullThreadDiffContextCalls).toBe(1);
+        expect(diffCheckpointsCalls).toEqual([
+          {
+            cwd: worktreePath ?? "/tmp/workspace/repos/primary",
+            fromCheckpointRef: checkpointRefForThreadTurn(threadId, 0),
+            toCheckpointRef,
+            ignoreWhitespace: true,
+          },
+        ]);
+        expect(result).toEqual({
           threadId,
+          fromTurnCount: 0,
           toTurnCount: 4,
-          ignoreWhitespace: true,
+          diff: "full thread diff patch",
         });
-      }).pipe(Effect.provide(layer));
+      }),
+    );
+  }
 
-      expect(getThreadCheckpointContextCalls).toBe(0);
-      expect(getFullThreadDiffContextCalls).toBe(1);
-      expect(diffCheckpointsCalls).toEqual([
-        {
-          cwd: "/tmp/worktree",
-          fromCheckpointRef: checkpointRefForThreadTurn(threadId, 0),
-          toCheckpointRef,
-          ignoreWhitespace: true,
-        },
-      ]);
-      expect(result).toEqual({
-        threadId,
-        fromTurnCount: 0,
-        toTurnCount: 4,
-        diff: "full thread diff patch",
-      });
-    }),
-  );
+  for (const scenario of [
+    { name: "single repository", repoRoots: [], worktreePath: null, expectedCwd: "/tmp/workspace" },
+    {
+      name: "code workspace",
+      repoRoots: ["/tmp/workspace/repos/primary", "/tmp/workspace/secondary"],
+      worktreePath: null,
+      expectedCwd: "/tmp/workspace/repos/primary",
+    },
+    {
+      name: "worktree in a code workspace",
+      repoRoots: ["/tmp/workspace/repos/primary"],
+      worktreePath: "/tmp/worktree",
+      expectedCwd: "/tmp/worktree",
+    },
+  ]) {
+    it.effect(`computes turn diffs in the checkpoint repository for ${scenario.name}`, () =>
+      Effect.gen(function* () {
+        const projectId = ProjectId.make("project-1");
+        const threadId = ThreadId.make("thread-1");
+        const toCheckpointRef = checkpointRefForThreadTurn(threadId, 1);
+        const diffCheckpointsCalls: Array<{
+          readonly fromCheckpointRef: CheckpointRef;
+          readonly toCheckpointRef: CheckpointRef;
+          readonly cwd: string;
+          readonly ignoreWhitespace: boolean;
+        }> = [];
 
-  it.effect("computes diffs using canonical turn-0 checkpoint refs", () =>
-    Effect.gen(function* () {
-      const projectId = ProjectId.make("project-1");
-      const threadId = ThreadId.make("thread-1");
-      const toCheckpointRef = checkpointRefForThreadTurn(threadId, 1);
-      const diffCheckpointsCalls: Array<{
-        readonly fromCheckpointRef: CheckpointRef;
-        readonly toCheckpointRef: CheckpointRef;
-        readonly cwd: string;
-        readonly ignoreWhitespace: boolean;
-      }> = [];
-
-      const threadCheckpointContext = makeThreadCheckpointContext({
-        projectId,
-        threadId,
-        workspaceRoot: "/tmp/workspace",
-        worktreePath: null,
-        checkpointTurnCount: 1,
-        checkpointRef: toCheckpointRef,
-      });
-
-      const checkpointStore: CheckpointStore.CheckpointStore["Service"] = {
-        isGitRepository: () => Effect.succeed(true),
-        captureCheckpoint: () => Effect.void,
-        hasCheckpointRef: () => Effect.succeed(true),
-        restoreCheckpoint: () => Effect.succeed(true),
-        diffCheckpoints: ({ fromCheckpointRef, toCheckpointRef, cwd, ignoreWhitespace }) =>
-          Effect.sync(() => {
-            diffCheckpointsCalls.push({
-              fromCheckpointRef,
-              toCheckpointRef,
-              cwd,
-              ignoreWhitespace,
-            });
-            return "diff patch";
+        const threadCheckpointContext = {
+          ...makeThreadCheckpointContext({
+            projectId,
+            threadId,
+            workspaceRoot: "/tmp/workspace",
+            worktreePath: scenario.worktreePath,
+            checkpointTurnCount: 1,
+            checkpointRef: toCheckpointRef,
           }),
-        deleteCheckpointRefs: () => Effect.void,
-      };
+          repoRoots: scenario.repoRoots,
+        };
 
-      const layer = CheckpointDiffQuery.layer.pipe(
-        Layer.provideMerge(Layer.succeed(CheckpointStore.CheckpointStore, checkpointStore)),
-        Layer.provideMerge(
-          Layer.succeed(ProjectionSnapshotQuery.ProjectionSnapshotQuery, {
-            getUserInputActivity: () => Effect.die("unused"),
-            listActivitiesByKind: () => Effect.die("unused"),
-            getCommandReadModel: () =>
-              Effect.die("CheckpointDiffQuery should not request the command read model"),
-            getSnapshot: () =>
-              Effect.die("CheckpointDiffQuery should not request the full orchestration snapshot"),
-            getShellSnapshot: () =>
-              Effect.die("CheckpointDiffQuery should not request the orchestration shell snapshot"),
-            getDeletedWorktreeThreads: () => Effect.die("unused"),
-            getArchivedShellSnapshot: () =>
-              Effect.die("CheckpointDiffQuery should not request archived shell snapshots"),
-            getSnapshotSequence: () => Effect.succeed({ snapshotSequence: 0 }),
-            getCounts: () => Effect.succeed({ projectCount: 0, threadCount: 0 }),
-            getEventReplayStats: () => Effect.die("unused"),
-            getActiveProjectByWorkspaceRoot: () => Effect.succeed(Option.none()),
-            getProjectShells: () => Effect.die("unused"),
-            getProjectShellById: () => Effect.succeed(Option.none()),
-            getFirstActiveThreadIdByProjectId: () => Effect.succeed(Option.none()),
-            getImportedAgentSessionSources: () => Effect.die("unused"),
-            getThreadCheckpointContext: () => Effect.succeed(Option.some(threadCheckpointContext)),
-            getFullThreadDiffContext: () => Effect.die("unused"),
-            getThreadRuntimeContext: () => Effect.die("unused"),
-            getTurnStartMessage: () => Effect.die("unused"),
-            getThreadShellById: () => Effect.succeed(Option.none()),
-            getThreadDetailById: () => Effect.succeed(Option.none()),
-            getThreadDetailSnapshot: () => Effect.succeed(Option.none()),
-            searchThreads: () => Effect.succeed({ matches: [] }),
-          }),
-        ),
-      );
+        const checkpointStore: CheckpointStore.CheckpointStore["Service"] = {
+          isGitRepository: () => Effect.succeed(true),
+          captureCheckpoint: () => Effect.void,
+          hasCheckpointRef: () => Effect.succeed(true),
+          restoreCheckpoint: () => Effect.succeed(true),
+          diffCheckpoints: ({ fromCheckpointRef, toCheckpointRef, cwd, ignoreWhitespace }) =>
+            Effect.sync(() => {
+              diffCheckpointsCalls.push({
+                fromCheckpointRef,
+                toCheckpointRef,
+                cwd,
+                ignoreWhitespace,
+              });
+              return "diff patch";
+            }),
+          deleteCheckpointRefs: () => Effect.void,
+        };
 
-      const result = yield* Effect.gen(function* () {
-        const query = yield* CheckpointDiffQuery.CheckpointDiffQuery;
-        return yield* query.getTurnDiff({
+        const layer = CheckpointDiffQuery.layer.pipe(
+          Layer.provideMerge(Layer.succeed(CheckpointStore.CheckpointStore, checkpointStore)),
+          Layer.provideMerge(
+            Layer.succeed(ProjectionSnapshotQuery.ProjectionSnapshotQuery, {
+              getUserInputActivity: () => Effect.die("unused"),
+              listActivitiesByKind: () => Effect.die("unused"),
+              getCommandReadModel: () =>
+                Effect.die("CheckpointDiffQuery should not request the command read model"),
+              getSnapshot: () =>
+                Effect.die(
+                  "CheckpointDiffQuery should not request the full orchestration snapshot",
+                ),
+              getShellSnapshot: () =>
+                Effect.die(
+                  "CheckpointDiffQuery should not request the orchestration shell snapshot",
+                ),
+              getDeletedWorktreeThreads: () => Effect.die("unused"),
+              getArchivedShellSnapshot: () =>
+                Effect.die("CheckpointDiffQuery should not request archived shell snapshots"),
+              getSnapshotSequence: () => Effect.succeed({ snapshotSequence: 0 }),
+              getCounts: () => Effect.succeed({ projectCount: 0, threadCount: 0 }),
+              getEventReplayStats: () => Effect.die("unused"),
+              getActiveProjectByWorkspaceRoot: () => Effect.succeed(Option.none()),
+              getProjectShells: () => Effect.die("unused"),
+              getProjectShellById: () => Effect.succeed(Option.none()),
+              getFirstActiveThreadIdByProjectId: () => Effect.succeed(Option.none()),
+              getImportedAgentSessionSources: () => Effect.die("unused"),
+              getThreadCheckpointContext: () =>
+                Effect.succeed(Option.some(threadCheckpointContext)),
+              getFullThreadDiffContext: () => Effect.die("unused"),
+              getThreadRuntimeContext: () => Effect.die("unused"),
+              getTurnStartMessage: () => Effect.die("unused"),
+              getThreadShellById: () => Effect.succeed(Option.none()),
+              getThreadDetailById: () => Effect.succeed(Option.none()),
+              getThreadDetailSnapshot: () => Effect.succeed(Option.none()),
+              searchThreads: () => Effect.succeed({ matches: [] }),
+            }),
+          ),
+        );
+
+        const result = yield* Effect.gen(function* () {
+          const query = yield* CheckpointDiffQuery.CheckpointDiffQuery;
+          return yield* query.getTurnDiff({
+            threadId,
+            fromTurnCount: 0,
+            toTurnCount: 1,
+            ignoreWhitespace: true,
+          });
+        }).pipe(Effect.provide(layer));
+
+        const expectedFromRef = checkpointRefForThreadTurn(threadId, 0);
+        expect(diffCheckpointsCalls).toEqual([
+          {
+            cwd: scenario.expectedCwd,
+            fromCheckpointRef: expectedFromRef,
+            toCheckpointRef,
+            ignoreWhitespace: true,
+          },
+        ]);
+        expect(result).toEqual({
           threadId,
           fromTurnCount: 0,
           toTurnCount: 1,
-          ignoreWhitespace: true,
+          diff: "diff patch",
         });
-      }).pipe(Effect.provide(layer));
-
-      const expectedFromRef = checkpointRefForThreadTurn(threadId, 0);
-      expect(diffCheckpointsCalls).toEqual([
-        {
-          cwd: "/tmp/workspace",
-          fromCheckpointRef: expectedFromRef,
-          toCheckpointRef,
-          ignoreWhitespace: true,
-        },
-      ]);
-      expect(result).toEqual({
-        threadId,
-        fromTurnCount: 0,
-        toTurnCount: 1,
-        diff: "diff patch",
-      });
-    }),
-  );
+      }),
+    );
+  }
 
   it.effect("defaults to hide whitespace changes", () =>
     Effect.gen(function* () {

@@ -78,7 +78,7 @@ export function useConfiguredWorkspaceRepositories(input: {
 
   const configured = useMemo(() => {
     if (!enabled || !cwd) return [] as ConfiguredDiffRepository[];
-    if (useRepoRoots) return repositoriesFromRepoRoots(repoRoots ?? []);
+    if (useRepoRoots) return repositoriesFromRepoRoots(repoRoots ?? [], cwd);
     if (configuredPaths.length === 0) return [] as ConfiguredDiffRepository[];
     const childrenByDirectory = new Map<string, string[]>();
     if (primaryWildcardDirectory !== null) {

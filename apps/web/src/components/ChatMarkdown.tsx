@@ -161,6 +161,7 @@ import {
 } from "../markdown-links";
 import { readLocalApi } from "../localApi";
 import { useAssetUrlRefresh, useAssetUrlState } from "../assets/assetUrls";
+import { resolveMarkdownFileOpenPath } from "~/lib/projectFileRoots";
 import { cn } from "../lib/utils";
 import { useRemoteOpenResolution, type RemoteOpenMode } from "../remoteOpen";
 import { useRightPanelStore } from "../rightPanelStore";
@@ -201,7 +202,20 @@ import { PullRequestLinkPreview } from "./pullRequest/PullRequestLinkPreview";
 
 interface ChatMarkdownProps {
   text: string;
+  /**
+   * Directory used to resolve relative markdown/file links. For code-workspace
+   * projects this should match the agent cwd (first repo root), not necessarily
+   * the `.code-workspace` anchor.
+   */
   cwd: string | undefined;
+  /**
+   * Project workspace anchor (directory containing a linked `.code-workspace`,
+   * or the single-folder root). Used with `repoRoots` when opening files so the
+   * Files panel reads under the owning repo rather than the anchor alone.
+   */
+  workspaceRoot?: string | undefined;
+  /** Absolute Git folder roots from a linked VS Code workspace, when present. */
+  repoRoots?: ReadonlyArray<string> | null | undefined;
   threadRef?: ScopedThreadRef | undefined;
   /** Panel that receives pull request links, including the standalone PR view. */
   pullRequestPanelRef?: ScopedThreadRef | undefined;
@@ -2329,7 +2343,10 @@ function useChatMarkdownState({
   renderContextReference,
   headingLevelOffset = 0,
   githubMedia = false,
+  workspaceRoot: workspaceRootProp,
+  repoRoots = null,
 }: ChatMarkdownProps) {
+  const projectWorkspaceRoot = workspaceRootProp ?? cwd;
   const { resolvedTheme } = useTheme();
   const [localMediaPreview, setLocalMediaPreview] = useState<ExpandedImagePreview | null>(null);
   const markdownRef = useRef<HTMLDivElement>(null);
@@ -2656,9 +2673,19 @@ function useChatMarkdownState({
         mediaMimeTypeFromExtension(
           fileLinkMeta.basename.slice(fileLinkMeta.basename.lastIndexOf(".")),
         ) !== null;
-      // Media outside the workspace keeps the expanded preview; other host
-      // files (a report in a temp dir) open read-only in the files panel.
+      // Derive the Files-panel path from the absolute location + every project
+      // root. Relativizing only against `cwd` (often the agent/first-repo cwd)
+      // drops the repo label and the panel then reads against the workspace
+      // anchor — missing nested paths like `.scratch/...`.
+      const openPath = projectWorkspaceRoot
+        ? resolveMarkdownFileOpenPath({
+            filePath: fileLinkMeta.filePath,
+            workspaceRoot: projectWorkspaceRoot,
+            repoRoots,
+          })
+        : null;
       const panelPath =
+        openPath?.treePath ??
         fileLinkMeta.workspaceRelativePath ??
         (!canPreviewMedia && isAbsolutePath(fileLinkMeta.filePath) ? fileLinkMeta.filePath : null);
 
@@ -2706,6 +2733,8 @@ function useChatMarkdownState({
       openMarkdownFileInPreview,
       openMarkdownMedia,
       preferredEditorMenuLabel,
+      projectWorkspaceRoot,
+      repoRoots,
       resolvedTheme,
       revealInFileManagerLabel,
       revealMarkdownFileInFileManager,

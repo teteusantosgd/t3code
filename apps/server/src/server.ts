@@ -370,7 +370,13 @@ const ProjectCloneTrackerLayerLive = ProjectCloneTracker.layer.pipe(
   Layer.provide(SourceControlRepositoryServiceLayerLive),
 );
 
+const WorkspaceAuthorizedRootsLayerLive = WorkspaceAuthorizedRoots.layer.pipe(
+  Layer.provide(ProjectionProjectRepositoryLive),
+  Layer.provide(ProjectionThreadRepositoryLive),
+);
+
 const ReviewLayerLive = ReviewService.layer.pipe(
+  Layer.provide(WorkspaceAuthorizedRootsLayerLive),
   Layer.provideMerge(GitVcsDriver.layer),
   Layer.provideMerge(VcsDriverRegistryLayerLive),
 );
@@ -415,11 +421,6 @@ const DeviceLayerLive = DeviceService.layer.pipe(
   Layer.provide(ServerSettingsLayerLive),
   Layer.provide(ProcessRunner.layer),
   Layer.provide(NetService.layer),
-);
-
-const WorkspaceAuthorizedRootsLayerLive = WorkspaceAuthorizedRoots.layer.pipe(
-  Layer.provide(ProjectionProjectRepositoryLive),
-  Layer.provide(ProjectionThreadRepositoryLive),
 );
 
 const WorkspaceEntriesLayerLive = WorkspaceEntries.layer.pipe(
