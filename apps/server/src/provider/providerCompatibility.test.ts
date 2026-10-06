@@ -65,6 +65,45 @@ describe("provider compatibility", () => {
     }
   });
 
+  it("keeps OpenCode 2 usable on Orchestrator V1 even when a remote policy calls it broken", () => {
+    const opencode = ProviderDriverKind.make("opencode");
+    const remoteBroken: ProviderCompatibilityPolicy = {
+      driver: opencode,
+      t3CodeRange: ">=0.0.42 <0.0.46",
+      recommendedRange: ">=1.14.19 <2.0.0",
+      recommendedVersion: "1.14.19",
+      ranges: [
+        { range: ">=2.0.0", status: "broken" },
+        { range: ">=1.14.19 <2.0.0", status: "supported" },
+        { range: "<1.14.19", status: "broken" },
+      ],
+    };
+    assert.strictEqual(
+      resolveProviderCompatibility([remoteBroken], opencode, "2.0.23", "0.0.42")?.status,
+      "supported",
+    );
+    assert.strictEqual(
+      resolveProviderCompatibility([remoteBroken], opencode, "1.14.19", "0.0.42")?.status,
+      "supported",
+    );
+    assert.strictEqual(
+      resolveProviderCompatibility([remoteBroken], opencode, "2.0.3", "0.0.42")?.status,
+      "unsupported",
+    );
+    assert.strictEqual(
+      resolveProviderCompatibility([remoteBroken], opencode, "1.14.18", "0.0.42")?.status,
+      "broken",
+    );
+    const orchestratorV2 = {
+      ...remoteBroken,
+      t3CodeRange: ">=0.0.46",
+    } satisfies ProviderCompatibilityPolicy;
+    assert.strictEqual(
+      resolveProviderCompatibility([orchestratorV2], opencode, "2.0.23", "0.0.46")?.status,
+      "broken",
+    );
+  });
+
   it("supports Codex 0.156 and marks Codex without Thread.projectId broken", () => {
     const bundled = ModelManifest.BUNDLED_MODEL_MANIFEST.compatibility;
     for (const [t3CodeVersion, codexVersion, expected] of [

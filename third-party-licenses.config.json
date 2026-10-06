@@ -154,6 +154,33 @@
   "packageOverrides": [
     {
       "license": "MIT",
+      "name": "@opencode/client",
+      "sourceUrl": "https://github.com/anomalyco/opencode/tree/dev/packages/client",
+      "generatedNotice": {
+        "licenseId": "MIT",
+        "copyrights": ["Copyright (c) 2025 opencode"]
+      }
+    },
+    {
+      "license": "MIT",
+      "name": "@opencode/protocol",
+      "sourceUrl": "https://github.com/anomalyco/opencode/tree/dev/packages/protocol",
+      "generatedNotice": {
+        "licenseId": "MIT",
+        "copyrights": ["Copyright (c) 2025 opencode"]
+      }
+    },
+    {
+      "license": "MIT",
+      "name": "@opencode/schema",
+      "sourceUrl": "https://github.com/anomalyco/opencode/tree/dev/packages/schema",
+      "generatedNotice": {
+        "licenseId": "MIT",
+        "copyrights": ["Copyright (c) 2025 opencode"]
+      }
+    },
+    {
+      "license": "MIT",
       "name": "@react-grab/cli",
       "sourceUrl": "https://github.com/aidenybai/react-grab/tree/main/packages/cli",
       "generatedNotice": {

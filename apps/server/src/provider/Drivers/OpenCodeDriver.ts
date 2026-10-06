@@ -203,9 +203,10 @@ export const OpenCodeDriver: ProviderDriver<OpenCodeSettings, OpenCodeDriverEnv>
                 const client = openCodeRuntime.createOpenCodeSdkClient({
                   baseUrl: server.url,
                   directory: cwd,
-                  ...(effectiveConfig.serverPassword
-                    ? { serverPassword: effectiveConfig.serverPassword }
+                  ...(server.serverPassword !== undefined
+                    ? { serverPassword: server.serverPassword }
                     : {}),
+                  ...(server.generation !== undefined ? { generation: server.generation } : {}),
                 });
                 return yield* loadWorkspaceInventory(client);
               }),
@@ -218,6 +219,7 @@ export const OpenCodeDriver: ProviderDriver<OpenCodeSettings, OpenCodeDriverEnv>
                   ...(server.serverPassword !== undefined
                     ? { serverPassword: server.serverPassword }
                     : {}),
+                  ...(server.generation !== undefined ? { generation: server.generation } : {}),
                 }),
               ),
             );

@@ -24,6 +24,7 @@ import {
   MINIMUM_OPENCODE_VERSION,
   OpenCodeRuntime,
   openCodeRuntimeErrorDetail,
+  type OpenCodeApiGeneration,
   type OpenCodeInventory,
 } from "../opencodeRuntime.ts";
 import type { Agent, ProviderListResponse } from "@opencode-ai/sdk/v2";
@@ -499,6 +500,7 @@ export const checkOpenCodeProviderStatus = Effect.fn("checkOpenCodeProviderStatu
     readonly url: string;
     readonly serverPassword?: string;
     readonly version: string;
+    readonly generation?: OpenCodeApiGeneration;
   }) =>
     openCodeRuntime
       .loadOpenCodeInventory(
@@ -506,6 +508,7 @@ export const checkOpenCodeProviderStatus = Effect.fn("checkOpenCodeProviderStatu
           baseUrl: server.url,
           directory: cwd,
           ...(server.serverPassword !== undefined ? { serverPassword: server.serverPassword } : {}),
+          ...(server.generation !== undefined ? { generation: server.generation } : {}),
         }),
       )
       .pipe(Effect.map((inventory) => ({ inventory, version: server.version })));

@@ -56,13 +56,62 @@ export const ProviderCompatibilityPolicy = Policy.pipe(
 );
 export type ProviderCompatibilityPolicy = typeof ProviderCompatibilityPolicy.Type;
 
+/**
+ * This fork keeps Orchestrator V1 and speaks OpenCode 2 from 2.0.18 up.
+ * Upstream's remote manifest marks every 2.x release broken for T3 Code
+ * before 0.0.46. Replace that matching policy so a refresh cannot hide a
+ * server this build can actually drive. OpenCode 1.14.19–1.x stays on the
+ * legacy client. 2.0.0–2.0.17 stays unsupported.
+ */
+const FORK_OPENCODE_V1_T3_RANGE = ">=0.0.42 <0.0.46";
+const forkOpenCodeV1Policy: ProviderCompatibilityPolicy = {
+  driver: "opencode",
+  t3CodeRange: FORK_OPENCODE_V1_T3_RANGE,
+  recommendedRange: ">=1.14.19 <2.0.0 || >=2.0.18",
+  ranges: [
+    { range: ">=2.0.18", status: "supported" },
+    { range: ">=2.0.0 <2.0.18", status: "unsupported" },
+    { range: ">=1.14.19 <2.0.0", status: "supported" },
+    { range: "<1.14.19", status: "broken" },
+  ],
+};
+
+function openCode2Status(
+  policy: ProviderCompatibilityPolicy,
+): ProviderCompatibilityPolicy["ranges"][number]["status"] | undefined {
+  return policy.ranges.find((entry) => satisfiesSemverRange("2.0.23", entry.range))?.status;
+}
+
+function policiesForResolution(
+  policies: ReadonlyArray<ProviderCompatibilityPolicy> | undefined,
+  driver: ProviderDriverKind,
+  t3CodeVersion: string,
+): ReadonlyArray<ProviderCompatibilityPolicy> | undefined {
+  if (
+    policies === undefined ||
+    driver !== "opencode" ||
+    !satisfiesSemverRange(t3CodeVersion, FORK_OPENCODE_V1_T3_RANGE)
+  ) {
+    return policies;
+  }
+  return policies.map((policy) => {
+    if (policy.driver !== "opencode" || !satisfiesSemverRange(t3CodeVersion, policy.t3CodeRange)) {
+      return policy;
+    }
+    // Only the upstream "OpenCode 2 is broken on V1" policy is rewritten.
+    // A policy that already supports 2.0.23 is left alone.
+    return openCode2Status(policy) === "broken" ? forkOpenCodeV1Policy : policy;
+  });
+}
+
 export function resolveProviderCompatibility(
   policies: ReadonlyArray<ProviderCompatibilityPolicy> | undefined,
   driver: ProviderDriverKind,
   version: string | null,
   t3CodeVersion = packageJson.version,
 ): ServerProviderCompatibilityAdvisory | undefined {
-  const policy = policies?.find(
+  const resolvedPolicies = policiesForResolution(policies, driver, t3CodeVersion);
+  const policy = resolvedPolicies?.find(
     (entry) => entry.driver === driver && satisfiesSemverRange(t3CodeVersion, entry.t3CodeRange),
   );
   if (!policy) return undefined;

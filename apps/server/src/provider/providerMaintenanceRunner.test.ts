@@ -759,7 +759,7 @@ describe("providerMaintenanceRunner", () => {
       Effect.provide(
         Layer.mergeAll(
           NonWindowsPlatform,
-          latestVersionHttpClient("2.0.0"),
+          latestVersionHttpClient("2.0.23"),
           mockSpawnerLayer((_command, args) => {
             calls.push(args.join(" "));
             if (calls.length === 1) {
