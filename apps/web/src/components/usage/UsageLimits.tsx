@@ -316,8 +316,8 @@ export function ResetCredits({
 
 /**
  * Subscription quota across every connected environment's providers and hubs,
- * pooled per provider. The page advances `now` on explicit refresh rather than
- * ticking: a live clock would repaint the page for no decision-changing gain.
+ * pooled per provider. `now` is the shared limits clock, the same instant the
+ * sidebar countdown uses.
  */
 export function UsageLimitsSection({
   selectedEnvironmentIds,

@@ -1,4 +1,8 @@
 import * as NodeAssert from "node:assert/strict";
+import * as NodeFS from "node:fs";
+import * as NodeOS from "node:os";
+import * as NodePath from "node:path";
+import { DatabaseSync } from "node:sqlite";
 
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { it } from "@effect/vitest";
@@ -25,7 +29,7 @@ import {
   openCodeCommandsToServerProviderSlashCommands,
 } from "./OpenCodeProvider.ts";
 import type { OpenCodeInventory } from "../opencodeRuntime.ts";
-import { readOpenCodeGoUsageLimits } from "./openCodeUsageLimits.ts";
+import { consoleGoStatusToLimits, readOpenCodeGoUsageLimits } from "./openCodeUsageLimits.ts";
 const decodeOpenCodeSettings = Schema.decodeSync(OpenCodeSettings);
 
 const DEFAULT_VERSION_STDOUT = "opencode 1.14.19\n";
@@ -72,15 +76,16 @@ it.effect("reads Go limits with the instance's XDG credentials and preserves res
     );
     NodeAssert.equal(limits.unavailable, undefined);
     NodeAssert.deepEqual(
-      limits.windows.map(({ kind, usedPercent, resetsAt: reset }) => ({
+      limits.windows.map(({ kind, label, usedPercent, resetsAt: reset }) => ({
         kind,
+        label,
         usedPercent,
         reset,
       })),
       [
-        { kind: "session", usedPercent: 0, reset: resetsAt },
-        { kind: "weekly", usedPercent: 10, reset: resetsAt },
-        { kind: "monthly", usedPercent: 100, reset: resetsAt },
+        { kind: "session", label: "Session", usedPercent: 0, reset: resetsAt },
+        { kind: "weekly", label: "Weekly", usedPercent: 10, reset: resetsAt },
+        { kind: "monthly", label: "Monthly", usedPercent: 100, reset: resetsAt },
       ],
     );
   }),
@@ -141,6 +146,150 @@ it.effect("keeps Go entitlement absence distinct from failed or malformed usage 
       NodeAssert.equal(limits.unavailable?.reason, reason);
       NodeAssert.deepEqual(limits.windows, []);
     }
+  }),
+);
+
+it.effect("reads Go limits from the local Console sign-in when no Go API key is stored", () =>
+  Effect.gen(function* () {
+    const dir = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "oc-limits-"));
+    yield* Effect.addFinalizer(() =>
+      Effect.sync(() => NodeFS.rmSync(dir, { recursive: true, force: true })),
+    );
+    const data = NodePath.join(dir, "opencode");
+    NodeFS.mkdirSync(data);
+    const db = new DatabaseSync(NodePath.join(data, "opencode.db"));
+    db.exec(
+      `CREATE TABLE credential (
+        id text primary key,
+        integration_id text,
+        value text not null,
+        active integer,
+        time_updated integer not null
+      )`,
+    );
+    const insert = db.prepare(
+      `INSERT INTO credential (id, integration_id, value, active, time_updated) VALUES (?, 'opencode', ?, ?, ?)`,
+    );
+    insert.run(
+      "old",
+      JSON.stringify({
+        type: "oauth",
+        access: "stale-access",
+        metadata: { server: "https://opencode.ai/console", orgID: "org_old" },
+      }),
+      0,
+      1,
+    );
+    insert.run(
+      "current",
+      JSON.stringify({
+        type: "oauth",
+        access: "console-access",
+        refresh: "ignored",
+        metadata: { server: "https://opencode.ai/console", orgID: "org_test", email: "hidden" },
+      }),
+      1,
+      2,
+    );
+    db.close();
+
+    const limits = yield* readOpenCodeGoUsageLimits({
+      enabled: true,
+      serverUrl: "",
+      environment: { XDG_DATA_HOME: dir },
+    }).pipe(
+      Effect.provideService(
+        FileSystem.FileSystem,
+        FileSystem.makeNoop({
+          readFileString: () => Effect.succeed("{}"),
+        }),
+      ),
+      Effect.provideService(
+        HttpClient.HttpClient,
+        HttpClient.make((request) => {
+          NodeAssert.equal(request.url, "https://opencode.ai/console/api/go/status");
+          NodeAssert.equal(request.headers.authorization, "Bearer console-access");
+          NodeAssert.equal(request.headers["x-org-id"], "org_test");
+          return Effect.succeed(
+            HttpClientResponse.fromWeb(
+              request,
+              Response.json({
+                product: "go",
+                access: {
+                  startsAt: "2026-10-05T10:53:14.000Z",
+                  endsAt: "2026-11-05T10:53:14.000Z",
+                  meters: {
+                    fiveHour: {
+                      startsAt: null,
+                      resetsAt: null,
+                      limitMicroCents: "1200000000",
+                      usedMicroCents: "0",
+                    },
+                    week: {
+                      resetsAt: "2026-10-19T00:00:00.000Z",
+                      limitMicroCents: "3000000000",
+                      usedMicroCents: "1500000000",
+                    },
+                    month: {
+                      resetsAt: "2026-11-05T10:53:14.000Z",
+                      limitMicroCents: "6000000000",
+                      usedMicroCents: "600000000",
+                    },
+                  },
+                },
+              }),
+            ),
+          );
+        }),
+      ),
+      Effect.provide(NodeServices.layer),
+    );
+
+    NodeAssert.equal(limits.unavailable, undefined);
+    NodeAssert.deepEqual(
+      limits.windows.map(({ id, kind, label, usedPercent, resetsAt, windowDurationMins }) => ({
+        id,
+        kind,
+        label,
+        usedPercent,
+        resetsAt: resetsAt ?? null,
+        windowDurationMins: windowDurationMins ?? null,
+      })),
+      [
+        {
+          id: "go_rolling",
+          kind: "session",
+          label: "Session",
+          usedPercent: 0,
+          resetsAt: null,
+          windowDurationMins: 5 * 60,
+        },
+        {
+          id: "go_weekly",
+          kind: "weekly",
+          label: "Weekly",
+          usedPercent: 50,
+          resetsAt: "2026-10-19T00:00:00.000Z",
+          windowDurationMins: 7 * 24 * 60,
+        },
+        {
+          id: "go_monthly",
+          kind: "monthly",
+          label: "Monthly",
+          usedPercent: 10,
+          resetsAt: "2026-11-05T10:53:14.000Z",
+          windowDurationMins: 31 * 24 * 60,
+        },
+      ],
+    );
+  }),
+);
+
+it.effect("treats a Console account without Go access as unsupported", () =>
+  Effect.gen(function* () {
+    const limits = consoleGoStatusToLimits({ access: null }, "2026-10-17T00:00:00.000Z");
+    NodeAssert.equal(limits.unavailable?.reason, "unsupported");
+    NodeAssert.deepEqual(limits.windows, []);
   }),
 );
 

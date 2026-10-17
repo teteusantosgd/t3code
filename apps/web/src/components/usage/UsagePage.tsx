@@ -22,6 +22,7 @@ import {
 } from "@t3tools/shared/usageMerge";
 
 import { isElectron } from "../../env";
+import { bumpLimitsNow, useLimitsNow } from "../../hooks/useLimitsNow";
 import { cn } from "../../lib/utils";
 import { environmentPresentations } from "../../state/presentation";
 import { serverEnvironment } from "../../state/server";
@@ -106,7 +107,7 @@ export function UsagePage() {
   const metric = preferences.metric;
   const showingLimits = metric === "limits";
   const [isRefreshing, setIsRefreshing] = useState(false);
-  const [limitsNow, setLimitsNow] = useState(() => Date.now());
+  const limitsNow = useLimitsNow();
   const refreshingRef = useRef(false);
   const [breakdown, setBreakdown] = useState<"model" | "time">("model");
   const [selectedEnvironmentIds, setSelectedEnvironmentIds] =
@@ -160,7 +161,7 @@ export function UsagePage() {
     });
   };
   const selectMetric = (nextMetric: UsageMetric) => {
-    if (nextMetric === "limits") setLimitsNow(Date.now());
+    if (nextMetric === "limits") bumpLimitsNow();
     const nextPreferences = { metric: nextMetric, windowDays };
     setPreferences(nextPreferences);
     saveUsagePagePreferences(nextPreferences);
@@ -180,7 +181,7 @@ export function UsagePage() {
         }),
       );
     } finally {
-      setLimitsNow(Date.now());
+      bumpLimitsNow();
     }
   };
   const refreshWindow = () => {

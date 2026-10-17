@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { parseTurnDiffFilesFromNumstat } from "./Diffs.ts";
+import { isOsMetadataPath, parseTurnDiffFilesFromNumstat } from "./Diffs.ts";
 
 describe("parseTurnDiffFilesFromNumstat", () => {
   it("returns an empty list when no files changed", () => {
@@ -40,6 +40,29 @@ describe("parseTurnDiffFilesFromNumstat", () => {
       { path: "empty.txt", additions: 0, deletions: 0 },
       { path: "image.png", additions: 0, deletions: 0 },
     ]);
+  });
+
+  it("drops operating-system metadata files", () => {
+    const numstat = [
+      "-\t-\t.DS_Store",
+      "0\t0\tsrc/.DS_Store",
+      "-\t-\tThumbs.db",
+      "1\t0\tassets/desktop.ini",
+      "1\t1\tsrc/app.ts",
+      "",
+    ].join("\0");
+
+    expect(parseTurnDiffFilesFromNumstat(numstat)).toEqual([
+      { path: "src/app.ts", additions: 1, deletions: 1 },
+    ]);
+  });
+
+  it("recognizes metadata basenames on either path separator", () => {
+    expect(isOsMetadataPath("C:\\repo\\.DS_Store")).toBe(true);
+    expect(isOsMetadataPath("repo/thumbs.db")).toBe(true);
+    expect(isOsMetadataPath("repo/DESKTOP.INI")).toBe(true);
+    expect(isOsMetadataPath("repo/.DS_Store.backup")).toBe(false);
+    expect(isOsMetadataPath("repo/notes.txt")).toBe(false);
   });
 
   it("preserves Unicode, tabs, line endings, and spaces in paths", () => {

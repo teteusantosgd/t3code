@@ -177,6 +177,7 @@ import {
   shouldNavigateAfterThreadPark,
   shouldRecedeSidebarThread,
   resolveWorkingStartedAt,
+  sidebarItemBelongsToHistory,
   sidebarListItemId,
   sidebarMarkerId,
   sortLogicalProjectsForSidebar,
@@ -2152,6 +2153,7 @@ export default function Sidebar() {
   const confirmThreadDelete = useClientSettings((s) => s.confirmThreadDelete);
   const confirmThreadArchive = useClientSettings((s) => s.confirmThreadArchive);
   const sidebarProjectSortOrder = useClientSettings((s) => s.sidebarProjectSortOrder);
+  const sidebarActiveThreadsAtBottom = useClientSettings((s) => s.sidebarActiveThreadsAtBottom);
   const timestampFormat = useClientSettings((s) => s.timestampFormat);
   const projectGroupingSettings = useClientSettings(selectProjectGroupingSettings);
   const {
@@ -3150,6 +3152,15 @@ export default function Sidebar() {
     (args) => restrictBelowSidebarLabel(args, dragLabelOffsetRef.current),
     [],
   );
+  // The below-Pins clamp assumes Pins sits at the top; inverted mode anchors
+  // the work block at the bottom, so the plain vertical clamp is enough.
+  const dndModifiers = useMemo(
+    () =>
+      sidebarActiveThreadsAtBottom
+        ? [restrictToVerticalAxis, restrictToFirstScrollableAncestor]
+        : [restrictToVerticalAxis, restrictBelowPins, restrictToFirstScrollableAncestor],
+    [restrictBelowPins, sidebarActiveThreadsAtBottom],
+  );
   const listMotionRef = useRef<ReturnType<typeof createSidebarListMotion> | null>(null);
   const attachListMotionRef = useCallback((node: HTMLUListElement | null) => {
     threadListRef.current = node;
@@ -3447,7 +3458,22 @@ export default function Sidebar() {
     },
     [sidebarListItems],
   );
-  const sortableIds = useMemo(() => sidebarListItems.map(sidebarListItemId), [sidebarListItems]);
+  // The sortable list follows the rendered order. Inverted mode renders the
+  // shelves before the work block, so the drop order is reversed there while
+  // `sidebarListItems` stays canonical for drop resolution.
+  const orderedSortableItems = useMemo(() => {
+    if (!sidebarActiveThreadsAtBottom) return sidebarListItems;
+    const shelves: SidebarListItem[] = [];
+    const work: SidebarListItem[] = [];
+    for (const item of sidebarListItems) {
+      (sidebarItemBelongsToHistory(item) ? shelves : work).push(item);
+    }
+    return [...shelves, ...work];
+  }, [sidebarActiveThreadsAtBottom, sidebarListItems]);
+  const sortableIds = useMemo(
+    () => orderedSortableItems.map(sidebarListItemId),
+    [orderedSortableItems],
+  );
   const draggedSettledOrder = useMemo(() => {
     const thread = dragState === null ? undefined : threadByKey.get(dragState.activeKey);
     if (dragState === null || thread === undefined) return [];
@@ -3461,7 +3487,9 @@ export default function Sidebar() {
   const sidebarSortingStrategy = useMemo(
     () =>
       createSidebarSortingStrategy({
-        items: sidebarListItems,
+        items: orderedSortableItems,
+        dropItems: sidebarListItems,
+        inverted: sidebarActiveThreadsAtBottom,
         boundaryLabelHeight: SIDEBAR_DRAG_LABEL_HEIGHT,
         settledOrder: draggedSettledOrder,
         settledExpanded: settledShelfExpanded,
@@ -3471,9 +3499,11 @@ export default function Sidebar() {
       }),
     [
       draggedSettledOrder,
+      orderedSortableItems,
       routeThreadKey,
       settledShelfExpanded,
       settledVisibleCount,
+      sidebarActiveThreadsAtBottom,
       sidebarListItems,
       snoozedThreads.length,
     ],
@@ -3531,6 +3561,7 @@ export default function Sidebar() {
       {
         items: sidebarListItems,
         activationY: dragActivationY ?? null,
+        inverted: sidebarActiveThreadsAtBottom,
       },
     );
   }, [
@@ -3544,6 +3575,7 @@ export default function Sidebar() {
     dragActivationY,
     draggableThreadKeys,
     pinnedKeys,
+    sidebarActiveThreadsAtBottom,
     sidebarListItems,
     threadByKey,
   ]);
@@ -4650,11 +4682,7 @@ export default function Sidebar() {
               <DndContext
                 sensors={dndSensors}
                 collisionDetection={dndCollisionDetection}
-                modifiers={[
-                  restrictToVerticalAxis,
-                  restrictBelowPins,
-                  restrictToFirstScrollableAncestor,
-                ]}
+                modifiers={dndModifiers}
                 onDragStart={handleThreadDragStart}
                 onDragOver={handleThreadDragOver}
                 onDragEnd={handleThreadDragEnd}
@@ -4800,7 +4828,7 @@ export default function Sidebar() {
                         );
                       };
                       const from = dragState?.activeSection ?? null;
-                      const items: ReactNode[] = [
+                      const draftNode = (
                         <SidebarDraftBlock
                           key="draft-sessions"
                           projectByKey={projectByKey}
@@ -4808,30 +4836,25 @@ export default function Sidebar() {
                           scopedProjectKeys={scopedProjectKeys}
                           routeDraftId={routeDraftIdForRows}
                           onNavigateToDraft={navigateToDraft}
-                        />,
-                      ];
-                      let usagePreviewInserted = false;
-                      const insertUsagePreview = () => {
-                        if (usagePreviewInserted) return;
-                        usagePreviewInserted = true;
-                        items.push(
-                          <SidebarUsageLimitsPreview
-                            key="usage-limits-preview"
-                            className="mt-auto"
-                          />,
-                        );
-                      };
+                        />
+                      );
+                      const limitsNode = <SidebarUsageLimitsPreview key="usage-limits-preview" />;
+
+                      // Work block (drafts, pinned, active) and history shelves
+                      // (Snoozed/Settled) render as two groups so either can sit
+                      // at the bottom of the sidebar.
+                      const workNodes: ReactNode[] = [];
+                      const historyNodes: ReactNode[] = [];
                       for (const item of sidebarListItems) {
                         if (item.kind === "thread") {
-                          items.push(renderThreadRow(threadByKey.get(item.key)!, item.section));
+                          const node = renderThreadRow(threadByKey.get(item.key)!, item.section);
+                          (sidebarItemBelongsToHistory(item) ? historyNodes : workNodes).push(node);
                           continue;
                         }
-                        if (item.marker === "snoozed-header" || item.marker === "settled-header") {
-                          insertUsagePreview();
-                        }
+                        const target = sidebarItemBelongsToHistory(item) ? historyNodes : workNodes;
                         switch (item.marker) {
                           case "pinned-header":
-                            items.push(
+                            target.push(
                               <SidebarDragBoundary
                                 key="pinned-header"
                                 marker="pinned-header"
@@ -4842,7 +4865,7 @@ export default function Sidebar() {
                             );
                             break;
                           case "pinned-divider":
-                            items.push(
+                            target.push(
                               <SidebarDragBoundary
                                 key="pinned-divider"
                                 marker="pinned-divider"
@@ -4853,7 +4876,7 @@ export default function Sidebar() {
                             );
                             break;
                           case "active-placeholder":
-                            items.push(
+                            target.push(
                               <SidebarSectionPlaceholder
                                 key="active-placeholder"
                                 marker="active-placeholder"
@@ -4871,7 +4894,7 @@ export default function Sidebar() {
                             );
                             break;
                           case "snoozed-header":
-                            items.push(
+                            target.push(
                               <SidebarSectionHeader
                                 key="snoozed-shelf-header"
                                 marker="snoozed-header"
@@ -4888,7 +4911,7 @@ export default function Sidebar() {
                             );
                             break;
                           case "settled-header":
-                            items.push(
+                            target.push(
                               <SidebarSectionHeader
                                 key="settled-shelf-header"
                                 marker="settled-header"
@@ -4907,7 +4930,7 @@ export default function Sidebar() {
                             );
                             break;
                           case "settled-placeholder":
-                            items.push(
+                            target.push(
                               <SidebarSectionPlaceholder
                                 key="settled-placeholder"
                                 marker="settled-placeholder"
@@ -4926,21 +4949,39 @@ export default function Sidebar() {
                             break;
                         }
                       }
-                      insertUsagePreview();
-                      return items;
+                      if (settledShelfExpanded && hiddenSettledCount > 0) {
+                        historyNodes.push(
+                          <li key="settled-show-more" className="list-none">
+                            <button
+                              type="button"
+                              onClick={showMoreSettled}
+                              className="flex h-9 w-full cursor-pointer items-center gap-2.5 rounded-md px-2.5 text-left text-sm text-sidebar-muted-foreground/55 hover:bg-sidebar-row-hover hover:text-sidebar-foreground"
+                            >
+                              <PlusIcon aria-hidden className="size-4 shrink-0" />
+                              Show {Math.min(hiddenSettledCount, SETTLED_TAIL_PAGE_COUNT)} more
+                            </button>
+                          </li>,
+                        );
+                      }
+
+                      // Default keeps in-progress work at the top; the tall-screen
+                      // preference anchors it to the bottom, above the shelves.
+                      const topNodes = sidebarActiveThreadsAtBottom
+                        ? [limitsNode, ...historyNodes]
+                        : [draftNode, ...workNodes];
+                      const bottomNodes = sidebarActiveThreadsAtBottom
+                        ? [draftNode, ...workNodes]
+                        : [limitsNode, ...historyNodes];
+                      return [
+                        ...topNodes,
+                        <li
+                          key="sidebar-bottom-anchor"
+                          aria-hidden
+                          className="mt-auto list-none"
+                        />,
+                        ...bottomNodes,
+                      ];
                     })()}
-                    {settledShelfExpanded && hiddenSettledCount > 0 ? (
-                      <li className="list-none">
-                        <button
-                          type="button"
-                          onClick={showMoreSettled}
-                          className="flex h-9 w-full cursor-pointer items-center gap-2.5 rounded-md px-2.5 text-left text-sm text-sidebar-muted-foreground/55 hover:bg-sidebar-row-hover hover:text-sidebar-foreground"
-                        >
-                          <PlusIcon aria-hidden className="size-4 shrink-0" />
-                          Show {Math.min(hiddenSettledCount, SETTLED_TAIL_PAGE_COUNT)} more
-                        </button>
-                      </li>
-                    ) : null}
                   </ul>
                 </SortableContext>
               </DndContext>

@@ -38,6 +38,7 @@ import {
   planSidebarThreadDrop,
   sidebarMarkerId,
   sidebarListItemId,
+  sidebarItemBelongsToHistory,
   sortPinnedThreadsForSidebar,
   sortThreadsForSidebar,
   sortProjectsForSidebar,
@@ -92,6 +93,31 @@ describe("animateSidebarLayoutChanges", () => {
 
   it("keeps layout movement while the user is sorting", () => {
     expect(animateSidebarLayoutChanges({ ...baseArgs, isSorting: true })).toBe(true);
+  });
+});
+
+describe("sidebarItemBelongsToHistory", () => {
+  const thread = (section: SidebarSection): SidebarListItem => ({
+    kind: "thread",
+    key: `thread-${section}`,
+    section,
+  });
+  const marker = (markerName: SidebarListMarker): SidebarListItem => ({
+    kind: "marker",
+    marker: markerName,
+  });
+
+  it("splits the work block from the history shelves", () => {
+    expect(sidebarItemBelongsToHistory(thread("pinned"))).toBe(false);
+    expect(sidebarItemBelongsToHistory(thread("active"))).toBe(false);
+    expect(sidebarItemBelongsToHistory(thread("snoozed"))).toBe(true);
+    expect(sidebarItemBelongsToHistory(thread("settled"))).toBe(true);
+    expect(sidebarItemBelongsToHistory(marker("pinned-header"))).toBe(false);
+    expect(sidebarItemBelongsToHistory(marker("pinned-divider"))).toBe(false);
+    expect(sidebarItemBelongsToHistory(marker("active-placeholder"))).toBe(false);
+    expect(sidebarItemBelongsToHistory(marker("snoozed-header"))).toBe(true);
+    expect(sidebarItemBelongsToHistory(marker("settled-header"))).toBe(true);
+    expect(sidebarItemBelongsToHistory(marker("settled-placeholder"))).toBe(true);
   });
 });
 

@@ -106,7 +106,10 @@ by name:
 
 Use a trailing `/*` to include every immediate child of a directory (for example `"apps/*"`). The
 `t3.json` list only affects Diff status and previews. Commits, pushes, pull requests, worktrees,
-and checkpoints still use the project root. Prefer a local thread for this layout; worktree
+and checkpoints still use the project root — for a linked workspace, the first Git folder. Keep
+that folder a real Git repository: a project anchored on a plain folder of repositories cannot
+show those repositories' files in checkpoints, and files Git ignores or treats as nested
+repositories never appear in checkpoint diffs. Prefer a local thread for this layout; worktree
 threads keep a single checkout.
 
 ## Clone or publish a project

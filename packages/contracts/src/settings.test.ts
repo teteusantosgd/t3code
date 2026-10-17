@@ -608,6 +608,18 @@ describe("ClientSettings sidebar", () => {
     expect(decodeClientSettingsPatch({ confirmThreadUnpin: true }).confirmThreadUnpin).toBe(true);
     expect(() => decodeClientSettingsPatch({ confirmThreadUnpin: "yes" })).toThrow();
   });
+
+  it("defaults working threads to the top and keeps the bottom anchor patchable", () => {
+    expect(decodeClientSettings({}).sidebarActiveThreadsAtBottom).toBe(false);
+    expect(
+      decodeClientSettings({ sidebarActiveThreadsAtBottom: true }).sidebarActiveThreadsAtBottom,
+    ).toBe(true);
+    expect(
+      decodeClientSettingsPatch({ sidebarActiveThreadsAtBottom: true })
+        .sidebarActiveThreadsAtBottom,
+    ).toBe(true);
+    expect(() => decodeClientSettingsPatch({ sidebarActiveThreadsAtBottom: "yes" })).toThrow();
+  });
 });
 
 describe("ClientSettings context window meter", () => {

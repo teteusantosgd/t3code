@@ -42,7 +42,7 @@ const EFFORT_CHOICES = [
   { id: "low", label: "Low" },
   { id: "medium", label: "Medium", isDefault: true },
   { id: "high", label: "High" },
-  { id: "xhigh", label: "Extra High" },
+  { id: "xhigh", label: "XHigh" },
 ] as const;
 
 /**
@@ -74,7 +74,7 @@ export const DESCRIPTOR_PRESETS_BY_KIND: Partial<
         { id: "low", label: "Low" },
         { id: "medium", label: "Medium" },
         { id: "high", label: "High", isDefault: true },
-        { id: "xhigh", label: "Extra High" },
+        { id: "xhigh", label: "XHigh" },
         { id: "max", label: "Max" },
       ],
     },

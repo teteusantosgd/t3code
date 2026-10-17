@@ -38,15 +38,17 @@ function window(
 }
 
 describe("windowsForSidebarPreview", () => {
-  it("keeps session and weekly when both are present", () => {
+  it("keeps session, weekly, and the plain monthly row", () => {
     const windows = [
       window("session", "primary", "Session"),
       window("weekly", "weekly", "Weekly"),
       window("monthly", "monthly", "Monthly"),
+      window("monthly", "api", "Monthly · API"),
     ];
-    expect(windowsForSidebarPreview(windows).map((entry) => entry.kind)).toEqual([
-      "session",
-      "weekly",
+    expect(windowsForSidebarPreview(windows).map((entry) => entry.label)).toEqual([
+      "Session",
+      "Weekly",
+      "Monthly",
     ]);
   });
 

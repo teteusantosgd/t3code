@@ -8,6 +8,7 @@ import {
 } from "./Sidebar.drag";
 import {
   resolveSidebarDropTarget,
+  sidebarItemBelongsToHistory,
   sidebarListItemId,
   sidebarMarkerId,
   type SidebarListItem,
@@ -789,6 +790,65 @@ describe("sidebar drag projection", () => {
     );
     expect(result.get(sidebarMarkerId("snoozed-header"))).toEqual({ ...stationary, y: 83 });
     expect(result.get(sidebarMarkerId("settled-header"))?.y).toBe(46);
+  });
+});
+
+describe("sidebar drag projection (inverted)", () => {
+  // Inverted renders the shelves before the work block; the strategy gets the
+  // visual order as `items` and the canonical order as `dropItems`.
+  const invert = (items: readonly SidebarListItem[]): SidebarListItem[] => [
+    ...items.filter((item) => sidebarItemBelongsToHistory(item)),
+    ...items.filter((item) => !sidebarItemBelongsToHistory(item)),
+  ];
+
+  it("projects a work-block reorder without moving the shelves", () => {
+    const canonical = [
+      pinnedHeader,
+      thread("p", "pinned"),
+      divider,
+      thread("a1", "active"),
+      thread("a2", "active"),
+      settledHeader,
+      thread("s", "settled"),
+    ];
+    const items = invert(canonical);
+    const result = preview(
+      { items, dropItems: canonical, inverted: true, settledOrder: [], settledExpanded: true },
+      "a2",
+      "a1",
+    );
+    expect(result.get("a2")).toEqual(stationary);
+    expect(result.get("a1")?.y).toBe(83);
+    expect(result.get(sidebarMarkerId("settled-header"))).toEqual(stationary);
+    expect(result.get("s")).toEqual(stationary);
+  });
+
+  it("projects a settled reorder without moving the work block", () => {
+    const canonical = [
+      pinnedHeader,
+      thread("p", "pinned"),
+      divider,
+      thread("a", "active"),
+      settledHeader,
+      thread("s1", "settled"),
+      thread("s2", "settled"),
+    ];
+    const items = invert(canonical);
+    const result = preview(
+      {
+        items,
+        dropItems: canonical,
+        inverted: true,
+        settledOrder: ["s2", "s1"],
+        settledExpanded: true,
+      },
+      "s2",
+      "s1",
+    );
+    expect(result.get("s2")).toEqual(stationary);
+    expect(result.get("s1")?.y).toBe(37);
+    expect(result.get(sidebarMarkerId("pinned-header"))).toEqual(stationary);
+    expect(result.get("p")).toEqual(stationary);
   });
 });
 

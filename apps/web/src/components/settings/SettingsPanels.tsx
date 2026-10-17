@@ -555,6 +555,10 @@ export function useSettingsRestore(onRestored?: () => void) {
       DEFAULT_UNIFIED_SETTINGS.sidebarProjectGroupingMode
         ? ["Project Grouping"]
         : []),
+      ...(settings.sidebarActiveThreadsAtBottom !==
+      DEFAULT_UNIFIED_SETTINGS.sidebarActiveThreadsAtBottom
+        ? ["Working threads at the bottom"]
+        : []),
       ...(settings.sidebarAutoSettleAfterDays !==
       DEFAULT_UNIFIED_SETTINGS.sidebarAutoSettleAfterDays
         ? ["Auto-settle inactive threads"]
@@ -2268,6 +2272,20 @@ export function GeneralSettingsPanel() {
                 });
               }}
               aria-label="Project grouping"
+            />
+          }
+        />
+
+        <SettingsRow
+          {...searchableSetting("sidebar-active-threads-at-bottom")}
+          description="Anchor drafts, pinned, and active threads to the bottom of the sidebar, above Settled."
+          control={
+            <Switch
+              checked={settings.sidebarActiveThreadsAtBottom}
+              onCheckedChange={(checked) =>
+                updateSettings({ sidebarActiveThreadsAtBottom: Boolean(checked) })
+              }
+              aria-label="Working threads at the bottom"
             />
           }
         />

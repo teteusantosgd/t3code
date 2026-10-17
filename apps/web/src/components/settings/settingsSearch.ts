@@ -275,6 +275,14 @@ export const SETTINGS_SEARCH_ITEMS = [
     searchTerms: ["combine matching repositories environments sidebar"],
   },
   {
+    id: "sidebar-active-threads-at-bottom",
+    title: "Working threads at the bottom",
+    to: "/settings/general",
+    searchTerms: [
+      "sidebar tall screen pin pinned active drafts work bottom composer settled order invert",
+    ],
+  },
+  {
     id: "auto-settle-inactive-threads",
     title: "Auto-settle inactive threads",
     to: "/settings/general",

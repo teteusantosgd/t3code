@@ -430,5 +430,41 @@ it.layer(TestLayer)("CheckpointStore.layer", (it) => {
         ]);
       }),
     );
+
+    it.effect("limits a diff to the checkpoint workspace subtree", () =>
+      Effect.gen(function* () {
+        const tmp = yield* makeTmpDir();
+        const sub = NodePath.join(tmp, "sub");
+        const fileSystem = yield* FileSystem.FileSystem;
+        yield* fileSystem.makeDirectory(sub, { recursive: true });
+        // No commit, so each baseline tree is built from its own cwd.
+        yield* git(tmp, ["init"]);
+        yield* writeTextFile(NodePath.join(tmp, "root.txt"), "root\n");
+        yield* writeTextFile(NodePath.join(sub, "sub.txt"), "one\n");
+        const checkpointStore = yield* CheckpointStore.CheckpointStore;
+        const threadId = ThreadId.make("checkpoint-scope-subtree");
+        const baseline = checkpointRefForThreadTurn(threadId, 0);
+        const turn = checkpointRefForThreadTurn(threadId, 1);
+
+        // Baseline captured at the repo root owns root.txt; the turn is captured
+        // inside sub/, so its tree only contains the subtree.
+        yield* checkpointStore.captureCheckpoint({ cwd: tmp, checkpointRef: baseline });
+        yield* writeTextFile(NodePath.join(sub, "sub.txt"), "one\ntwo\n");
+        yield* checkpointStore.captureCheckpoint({ cwd: sub, checkpointRef: turn });
+
+        const numstat = yield* checkpointStore.diffCheckpoints({
+          cwd: sub,
+          fromCheckpointRef: baseline,
+          toCheckpointRef: turn,
+          ignoreWhitespace: false,
+          format: "numstat",
+        });
+
+        // Without the workspace pathspec, root.txt would read as a deletion.
+        expect(parseTurnDiffFilesFromNumstat(numstat)).toEqual([
+          { path: "sub/sub.txt", additions: 1, deletions: 0 },
+        ]);
+      }),
+    );
   });
 });

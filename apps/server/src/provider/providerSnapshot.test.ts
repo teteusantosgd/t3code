@@ -10,6 +10,7 @@ import * as Stream from "effect/Stream";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 
 import {
+  buildServerProvider,
   isCommandMissingCause,
   parseGenericCliVersion,
   providerModelsFromSettings,
@@ -91,6 +92,69 @@ describe("providerModelsFromSettings", () => {
 
     expect(models.map((model) => model.slug)).toEqual(["claude-opus-4-8", "opus"]);
     expect(models[1]?.isCustom).toBe(true);
+  });
+});
+
+describe("buildServerProvider", () => {
+  it("labels xhigh effort as XHigh and keeps its option id", () => {
+    const provider = buildServerProvider({
+      presentation: { displayName: "Test" },
+      enabled: true,
+      checkedAt: "2026-01-01T00:00:00.000Z",
+      models: [
+        {
+          slug: "effort-model",
+          name: "Effort model",
+          isCustom: false,
+          capabilities: createModelCapabilities({
+            optionDescriptors: [
+              {
+                id: "effort",
+                label: "Reasoning",
+                type: "select",
+                options: [
+                  { id: "high", label: "High" },
+                  { id: "xhigh", label: "Extra High" },
+                  { id: "max", label: "Max" },
+                ],
+                currentValue: "xhigh",
+              },
+            ],
+          }),
+        },
+        { slug: "bare-model", name: "Bare model", isCustom: false, capabilities: null },
+      ],
+      probe: {
+        installed: true,
+        version: "1.0.0",
+        status: "ready",
+        auth: { status: "authenticated" },
+      },
+    });
+
+    expect(provider.models).toEqual([
+      {
+        slug: "effort-model",
+        name: "Effort model",
+        isCustom: false,
+        capabilities: {
+          optionDescriptors: [
+            {
+              id: "effort",
+              label: "Reasoning",
+              type: "select",
+              options: [
+                { id: "high", label: "High" },
+                { id: "xhigh", label: "XHigh" },
+                { id: "max", label: "Max" },
+              ],
+              currentValue: "xhigh",
+            },
+          ],
+        },
+      },
+      { slug: "bare-model", name: "Bare model", isCustom: false, capabilities: null },
+    ]);
   });
 });
 

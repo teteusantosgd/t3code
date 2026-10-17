@@ -5,7 +5,6 @@ import {
   sidebarListItemId,
   sidebarMarkerId,
   type SidebarListItem,
-  type SidebarListMarker,
   type SidebarSection,
 } from "./Sidebar.logic";
 
@@ -32,6 +31,9 @@ export function createSidebarCollisionDetection(
   options: {
     items?: readonly SidebarListItem[];
     activationY?: number | null;
+    /** Inverted layout: the pinned/active divider no longer sits above the
+     * shelves, so skip the top-down boundary heuristic. */
+    inverted?: boolean;
   } = {},
 ): CollisionDetection {
   const validity = new Map<string, boolean>();
@@ -47,7 +49,7 @@ export function createSidebarCollisionDetection(
       .find((container) => container.id === sidebarMarkerId("pinned-divider"))
       ?.node.current?.querySelector(".sidebar-drag-boundary-label")
       ?.getBoundingClientRect();
-    if (items && boundary && source?.kind === "thread" && pointer) {
+    if (items && boundary && source?.kind === "thread" && pointer && options.inverted !== true) {
       boundarySection ??= source.section === "pinned" ? "pinned" : "active";
       // Use the visible divider row, including its sortable translation.
       // Only pointer movement can change sections: opening the destination
@@ -96,6 +98,11 @@ export function createSidebarCollisionDetection(
  * A zero scaleY marks rows/markers to hide while retaining their measured nodes. */
 export function createSidebarSortingStrategy(input: {
   items: readonly SidebarListItem[];
+  /** Canonical section order used to resolve a drop. Defaults to `items`. */
+  dropItems?: readonly SidebarListItem[];
+  /** Render the work block (Pinned/Active) after the shelves. `items` is then
+   * already in that visual order, but `dropItems` stays canonical. */
+  inverted?: boolean;
   settledOrder: readonly string[];
   settledExpanded: boolean;
   settledVisibleCount?: number;
@@ -108,6 +115,7 @@ export function createSidebarSortingStrategy(input: {
   boundaryLabelHeight?: number;
 }): SortingStrategy {
   const { items } = input;
+  const dropItems = input.dropItems ?? items;
   const indices = new Map(items.map((item, index) => [sidebarListItemId(item), index]));
   let previous: Pick<Layout, "rects" | "activeIndex" | "overIndex"> | undefined;
   let transforms: ReturnType<SortingStrategy>[] | null = [];
@@ -116,7 +124,7 @@ export function createSidebarSortingStrategy(input: {
     const active = items[activeIndex];
     const over = items[overIndex] ?? active;
     if (active?.kind !== "thread" || !over || !rects[0]) return [];
-    const target = resolveSidebarDropTarget(items, active.key, sidebarListItemId(over));
+    const target = resolveSidebarDropTarget(dropItems, active.key, sidebarListItemId(over));
     if (!target) return [];
     const groups: Record<SidebarSection, ThreadItem[]> = {
       pinned: [],
@@ -170,26 +178,32 @@ export function createSidebarSortingStrategy(input: {
       visible.push(routeKey);
     }
     groups.settled = visible.map((key) => ({ kind: "thread", key, section: "settled" }));
-    const projected: SidebarListItem[] = [];
-    const marker = (name: SidebarListMarker) => projected.push({ kind: "marker", marker: name });
-    const section = (name: "active" | "settled") => {
-      if (groups[name].length > 0) projected.push(...groups[name]);
-      else marker(`${name}-placeholder`);
-    };
-    marker("pinned-header");
-    projected.push(...groups.pinned);
-    marker("pinned-divider");
-    section("active");
+    // Build the two blocks so the projection follows the rendered order:
+    // canonical is work-then-shelves, inverted is shelves-then-work.
+    const workBlock: SidebarListItem[] = [];
+    const shelfBlock: SidebarListItem[] = [];
+    workBlock.push({ kind: "marker", marker: "pinned-header" });
+    workBlock.push(...groups.pinned);
+    workBlock.push({ kind: "marker", marker: "pinned-divider" });
+    if (groups.active.length > 0) workBlock.push(...groups.active);
+    else workBlock.push({ kind: "marker", marker: "active-placeholder" });
     if (
       groups.snoozed.length > 0 ||
       ((active.section !== "snoozed" || (input.snoozedThreadCount ?? 0) > 1) &&
         items.some((item) => item.kind === "marker" && item.marker === "snoozed-header"))
     ) {
-      marker("snoozed-header");
-      projected.push(...groups.snoozed);
+      shelfBlock.push({ kind: "marker", marker: "snoozed-header" });
+      shelfBlock.push(...groups.snoozed);
     }
-    marker("settled-header");
-    section("settled");
+    shelfBlock.push({ kind: "marker", marker: "settled-header" });
+    if (groups.settled.length > 0) shelfBlock.push(...groups.settled);
+    else shelfBlock.push({ kind: "marker", marker: "settled-placeholder" });
+
+    const inverted = input.inverted === true;
+    const projected = inverted ? [...shelfBlock, ...workBlock] : [...workBlock, ...shelfBlock];
+    // The auto-margin slack sits before whichever block renders second.
+    const secondBlockStart = inverted ? shelfBlock.length : workBlock.length;
+
     const heights = projected.map((item) => {
       const index = indices.get(sidebarListItemId(item));
       const rect = index === undefined ? undefined : rects[index];
@@ -207,36 +221,37 @@ export function createSidebarSortingStrategy(input: {
             ? fallback
             : (rect?.height ?? fallback);
     });
-    const firstShelf = items.findIndex(
-      (item) =>
-        item.kind === "marker" &&
-        (item.marker === "snoozed-header" || item.marker === "settled-header"),
-    );
-    const shelfRect = rects[firstShelf];
-    const beforeShelf = rects[firstShelf - 1];
+    const boundaryIndex = inverted
+      ? items.findIndex((item) => item.kind === "marker" && item.marker === "pinned-header")
+      : items.findIndex(
+          (item) =>
+            item.kind === "marker" &&
+            (item.marker === "snoozed-header" || item.marker === "settled-header"),
+        );
+    const boundaryRect = boundaryIndex >= 0 ? rects[boundaryIndex] : undefined;
+    const beforeBoundary = boundaryIndex > 0 ? rects[boundaryIndex - 1] : undefined;
     const lastRect = rects.at(-1);
-    // Consume the shelf's auto margin as drag labels and resized rows need
-    // room, keeping the combined shelves at their measured bottom.
+    // Consume the second block's auto margin as drag labels and resized rows
+    // need room, keeping the combined blocks at their measured bottom.
     let shelfSpace =
-      shelfRect && beforeShelf && lastRect && shelfRect.top > beforeShelf.bottom + 1
+      boundaryRect && beforeBoundary && lastRect && boundaryRect.top > beforeBoundary.bottom + 1
         ? Math.max(
             0,
-            lastRect.bottom - rects[0].top - heights.reduce((sum, height) => sum + height + 1, -1),
+            lastRect.bottom - rects[0]!.top - heights.reduce((sum, height) => sum + height + 1, -1),
           )
         : 0;
     const result = items.map(() => hidden);
-    let top = rects[0].top;
+    let top = rects[0]!.top;
     for (const [projectedIndex, item] of projected.entries()) {
-      if (
-        item.kind === "marker" &&
-        (item.marker === "snoozed-header" || item.marker === "settled-header")
-      ) {
+      if (projectedIndex === secondBlockStart) {
         top += shelfSpace;
         shelfSpace = 0;
       }
-      const index = indices.get(sidebarListItemId(item));
-      const rect = index === undefined ? undefined : rects[index];
-      if (index !== undefined && rect) result[index] = { ...stationary, y: top - rect.top };
+      const itemIndex = indices.get(sidebarListItemId(item));
+      const rect = itemIndex === undefined ? undefined : rects[itemIndex];
+      if (itemIndex !== undefined && rect) {
+        result[itemIndex] = { ...stationary, y: top - rect.top };
+      }
       top += heights[projectedIndex]! + 1;
     }
     result[activeIndex] = stationary;

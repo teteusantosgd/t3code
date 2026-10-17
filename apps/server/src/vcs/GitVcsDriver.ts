@@ -1213,6 +1213,12 @@ export const makeVcsDriverShape = Effect.fn("makeGitVcsDriverShape")(function* (
           ...(input.ignoreWhitespace ? ["--ignore-all-space"] : []),
           `${fromRevision}^{commit}`,
           `${input.toCheckpointRef}^{commit}`,
+          // Checkpoints are scoped to the workspace directory. Restricting the diff
+          // to `.` keeps a baseline captured against a broader repo root (or a
+          // different root) from reporting phantom deletions for files the
+          // checkpoint never owned.
+          "--",
+          ".",
         ],
         allowNonZeroExit: true,
         maxOutputBytes: CHECKPOINT_DIFF_MAX_OUTPUT_BYTES,

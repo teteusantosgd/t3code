@@ -9,8 +9,9 @@ import {
 } from "@t3tools/shared/usageLimits";
 import * as Schema from "effect/Schema";
 import { ChevronDownIcon } from "lucide-react";
-import { Fragment, useCallback, useEffect, useEffectEvent, useMemo, useState } from "react";
+import { Fragment, useCallback, useEffect, useEffectEvent, useMemo } from "react";
 
+import { bumpLimitsNow, useLimitsNow } from "../../hooks/useLimitsNow";
 import { useLocalStorage } from "../../hooks/useLocalStorage";
 import { cn } from "../../lib/utils";
 import { environmentPresentations } from "../../state/presentation";
@@ -146,7 +147,7 @@ export function SidebarUsageLimitsPreview({ className }: { readonly className?: 
     reportFailure: false,
   });
   const navigate = useNavigate();
-  const [now, setNow] = useState(() => Date.now());
+  const now = useLimitsNow();
   const [expanded, setExpanded] = useLocalStorage(LIMITS_SHELF_EXPANDED_KEY, true, Schema.Boolean);
   const toggleExpanded = useCallback(() => setExpanded((value) => !value), [setExpanded]);
   const pools = useMemo(
@@ -162,19 +163,22 @@ export function SidebarUsageLimitsPreview({ className }: { readonly className?: 
   }, [navigate]);
 
   const refreshLimits = useEffectEvent(async (automatic: boolean) => {
-    await Promise.all(
-      Array.from(presentations, ([environmentId, presentation]) => {
-        if (presentation.connection.phase !== "connected" || presentation.serverConfig === null) {
-          return;
-        }
-        return refreshUsageLimits(
-          environmentId,
-          () => refreshProviders({ environmentId, input: {} }),
-          automatic,
-        );
-      }),
-    );
-    setNow(Date.now());
+    try {
+      await Promise.all(
+        Array.from(presentations, ([environmentId, presentation]) => {
+          if (presentation.connection.phase !== "connected" || presentation.serverConfig === null) {
+            return;
+          }
+          return refreshUsageLimits(
+            environmentId,
+            () => refreshProviders({ environmentId, input: {} }),
+            automatic,
+          );
+        }),
+      );
+    } finally {
+      bumpLimitsNow();
+    }
   });
 
   const connectedKey = [...presentations]
@@ -191,7 +195,8 @@ export function SidebarUsageLimitsPreview({ className }: { readonly className?: 
     void refreshLimits(true);
   }, [connectedKey]);
 
-  // Empty mt-auto slot keeps Settled/Snoozed pinned when there is no limits data.
+  // The sidebar's bottom anchor handles pinning; an empty slot keeps the list
+  // stable when there is no limits data.
   if (!visible) {
     return <li className={cn("list-none", className)} />;
   }

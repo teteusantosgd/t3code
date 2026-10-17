@@ -143,6 +143,18 @@ export function sidebarListItemId(item: SidebarListItem): string {
   return item.kind === "thread" ? item.key : sidebarMarkerId(item.marker);
 }
 
+/** Whether a list item belongs to the history shelves (Snoozed/Settled) rather
+    than the work block (Pinned/Active). Lets the sidebar anchor either group to
+    the bottom without touching the drop-target order. */
+export function sidebarItemBelongsToHistory(item: SidebarListItem): boolean {
+  if (item.kind === "thread") return item.section === "snoozed" || item.section === "settled";
+  return (
+    item.marker === "snoozed-header" ||
+    item.marker === "settled-header" ||
+    item.marker === "settled-placeholder"
+  );
+}
+
 /** The section a slot belongs to, read off the markers around it: from
     the top down, everything before the pinned divider is pinned, then the
     inbox until the snoozed header, the shelf until the settled header,
