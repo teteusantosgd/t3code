@@ -12,6 +12,7 @@ import * as Migrator from "effect/sql/Migrator";
 import * as Effect from "effect/Effect";
 import * as SqlClient from "effect/sql/SqlClient";
 import { reconcileV2PreviewMigration } from "./reconcileV2PreviewMigration.ts";
+import { reconcileForkWorkspaceMigration } from "./reconcileForkWorkspaceMigration.ts";
 
 // Import all migrations statically
 import Migration0001 from "./Migrations/001_OrchestrationEvents.ts";
@@ -232,6 +233,7 @@ export const runMigrations = Effect.fn("runMigrations")(function* ({
 }: RunMigrationsOptions = {}) {
   const includesV2 =
     toMigrationInclusive === undefined || toMigrationInclusive >= FIRST_V2_MIGRATION_ID;
+  if (includesV2) yield* reconcileForkWorkspaceMigration();
   const previewMigrations = includesV2 ? yield* reconcileV2PreviewMigration() : [];
   if (includesV2) {
     yield* assertV2MigrationsCanRun(toMigrationInclusive);

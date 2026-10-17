@@ -79,6 +79,8 @@ async function renderPanel(overrides: Partial<ComponentProps<typeof RightPanelTa
         onAddBrowser={noop}
         onAddBrowserInProfile={noop}
         onAddTerminal={noop}
+        onAddChanges={() => undefined}
+        changesAvailable={false}
         onAddDiff={noop}
         onAddFiles={addFiles}
         onAddPullRequest={noop}

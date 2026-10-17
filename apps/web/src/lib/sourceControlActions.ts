@@ -7,4 +7,6 @@ export {
   useSourceControlPublishRepositoryAction,
   useVcsInitAction,
   useVcsPullAction,
+  useVcsChangeActions,
+  type VcsRepositoryTarget,
 } from "../state/sourceControlActions";

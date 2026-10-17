@@ -229,6 +229,7 @@ function makeThreadCreatedEvent(input: {
   readonly threadId: ThreadId;
   readonly now: DateTime.Utc;
   readonly projectId?: ProjectId;
+  readonly runtimeMode?: OrchestrationV2AppThread["runtimeMode"];
 }) {
   return Effect.gen(function* () {
     const projectId =
@@ -248,7 +249,7 @@ function makeThreadCreatedEvent(input: {
       title: "Provider session manager",
       providerInstanceId: modelSelection.instanceId,
       modelSelection,
-      runtimeMode: "full-access",
+      runtimeMode: input.runtimeMode ?? "full-access",
       interactionMode: "default",
       branch: null,
       worktreePath: null,
@@ -695,6 +696,73 @@ function runBrowserAccessScenario(input: {
     );
 
     return (yield* Ref.get(mcpConfigs))[0];
+  });
+}
+
+/** The capabilities the MCP credential of a fresh thread carries, with only terminal access varied. */
+function runTerminalAccessScenario(input: {
+  readonly enableAgentTerminalAccess: boolean;
+  readonly projectOverride?: boolean;
+  readonly runtimeMode?: OrchestrationV2AppThread["runtimeMode"];
+}) {
+  return Effect.gen(function* () {
+    const state = yield* Ref.make(emptyState);
+    const mcpConfigs = yield* Ref.make<
+      ReadonlyArray<McpProviderSession.McpProviderSessionConfig | undefined>
+    >([]);
+    const projectId = ProjectId.make("project-provider-session-manager-terminal-access");
+    const threadId = ThreadId.make("thread-provider-session-manager-terminal-access");
+    const layerProjectService = Layer.mock(ProjectService.ProjectService)({
+      getById: (requestedProjectId) =>
+        Effect.succeed(Option.some(makeBrowserAccessProject(requestedProjectId))),
+    });
+    return yield* Effect.gen(function* () {
+      const eventSink = yield* EventSink.EventSinkV2;
+      const idAllocator = yield* IdAllocator.IdAllocatorV2;
+      const manager = yield* ProviderSessionManager.ProviderSessionManagerV2;
+      const registry = yield* McpSessionRegistry.McpSessionRegistry;
+      const now = yield* DateTime.now;
+      const providerSessionId = yield* idAllocator.allocate.providerSession({
+        providerInstanceId: modelSelection.instanceId,
+        threadId,
+      });
+      yield* eventSink.write({
+        events: [
+          yield* makeThreadCreatedEvent({
+            idAllocator,
+            threadId,
+            now,
+            projectId,
+            ...(input.runtimeMode === undefined ? {} : { runtimeMode: input.runtimeMode }),
+          }),
+        ],
+      });
+      yield* manager.open({ threadId, providerSessionId, modelSelection, runtimePolicy });
+      const captured = (yield* Ref.get(mcpConfigs))[0];
+      const token = captured?.authorizationHeader.replace(/^Bearer\s+/, "");
+      const resolved = yield* registry.resolve(token!);
+      yield* manager.close(providerSessionId);
+      return resolved?.capabilities.has("terminal") ?? false;
+    }).pipe(
+      Effect.provide(
+        layerTest({
+          state,
+          idleTimeoutMs: 1_000,
+          mcpConfigs,
+          projectServiceLayer: layerProjectService,
+          serverSettingsLayer: ServerSettings.layerTest({
+            enableAgentTerminalAccess: input.enableAgentTerminalAccess,
+            ...(input.projectOverride === undefined
+              ? {}
+              : {
+                  projectSettingsOverrides: {
+                    [projectId]: { enableAgentTerminalAccess: input.projectOverride },
+                  },
+                }),
+          }),
+        }),
+      ),
+    );
   });
 }
 
@@ -1958,7 +2026,7 @@ it.effect(
         const resolved = yield* registry.resolve(token!);
         assert.deepEqual(
           resolved?.capabilities,
-          new Set(["orchestration", "worktree", "pull-requests"]),
+          new Set(["orchestration", "worktree", "pull-requests", "terminal"]),
         );
 
         yield* manager.close(providerSessionId);
@@ -2025,6 +2093,33 @@ it.effect("ProviderSessionManagerV2 fails browser access closed for a missing th
     assert.isDefined(captured);
     assert.equal(captured?.browserToolsAvailable, false);
   }),
+);
+
+it.effect.each([
+  ["full access with the setting on", { enableAgentTerminalAccess: true }, true],
+  ["the setting off", { enableAgentTerminalAccess: false }, false],
+  [
+    "an approval-required thread",
+    { enableAgentTerminalAccess: true, runtimeMode: "approval-required" as const },
+    false,
+  ],
+  ["a project opt-out", { enableAgentTerminalAccess: true, projectOverride: false }, false],
+  [
+    "a project opt-in on an approval-required thread",
+    {
+      enableAgentTerminalAccess: false,
+      projectOverride: true,
+      runtimeMode: "approval-required" as const,
+    },
+    false,
+  ],
+  ["a project opt-in", { enableAgentTerminalAccess: false, projectOverride: true }, true],
+] as const)(
+  "ProviderSessionManagerV2 grants the terminal capability for %s: %s",
+  ([, scenario, granted]) =>
+    Effect.gen(function* () {
+      assert.equal(yield* runTerminalAccessScenario(scenario), granted);
+    }),
 );
 
 it.effect("ProviderSessionManagerV2 revokes MCP credentials when release persistence fails", () =>

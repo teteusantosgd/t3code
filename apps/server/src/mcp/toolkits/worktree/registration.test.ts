@@ -30,6 +30,7 @@ import * as ThreadSearch from "../../../orchestration-v2/ThreadSearch.ts";
 import * as PreviewManager from "../../../preview/Manager.ts";
 import * as SourceControlRepositoryService from "../../../sourceControl/SourceControlRepositoryService.ts";
 import * as GitVcsDriver from "../../../vcs/GitVcsDriver.ts";
+import * as TerminalManager from "../../../terminal/Manager.ts";
 import * as McpHttpServer from "../../McpHttpServer.ts";
 import * as McpSessionRegistry from "../../McpSessionRegistry.ts";
 import * as PreviewAutomationBroker from "../../PreviewAutomationBroker.ts";
@@ -51,6 +52,7 @@ const layerStubServices = Layer.mergeAll(
   Layer.mock(ProjectSetupScriptRunner.ProjectSetupScriptRunner)({}),
   Layer.mock(VcsStatusBroadcaster.VcsStatusBroadcaster)({}),
   Layer.mock(GitVcsDriver.GitVcsDriver)({}),
+  Layer.mock(TerminalManager.TerminalManager)({}),
   Layer.mock(ManagedProjectFolders.ManagedProjectFolders)({ namedProjectsRoot: "/unused" }),
   Layer.mock(PreviewManager.PreviewManager)({}),
   Layer.mock(ServerSecretStore.ServerSecretStore)({}),

@@ -21,16 +21,21 @@ import * as ProjectionStore from "../orchestration-v2/ProjectionStore.ts";
 import * as EventSink from "../orchestration-v2/EventSink.ts";
 import * as LegacyV1ThreadImporter from "../orchestration-v2/legacy/LegacyV1ThreadImporter.ts";
 
-it.effect(
-  "snapshots V1, imports transcripts lazily, and preserves both databases across switches",
-  () => {
+it.effect.each([false, true])(
+  "snapshots V1, imports transcripts, and preserves V1 with fork workspace migration: %s",
+  (forkWorkspace) => {
     const directory = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "t3-v1-v2-"));
     const sourcePath = NodePath.join(directory, "state.sqlite");
     const destinationPath = NodePath.join(directory, "statev2.sqlite");
     const threadId = ThreadId.make("legacy-thread");
     const seed = Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient;
-      yield* runMigrations({ toMigrationInclusive: 52 });
+      yield* runMigrations({ toMigrationInclusive: 54 });
+      if (forkWorkspace) {
+        yield* sql`ALTER TABLE projection_projects ADD COLUMN workspace_file TEXT`;
+        yield* sql`ALTER TABLE projection_projects ADD COLUMN repo_roots_json TEXT`;
+        yield* sql`INSERT INTO effect_sql_migrations (migration_id, name) VALUES (55, 'ProjectionProjectsCodeWorkspace')`;
+      }
       yield* sql`INSERT INTO projection_projects (project_id, title, workspace_root, scripts_json, created_at, updated_at)
       VALUES ('project', 'Project', '/tmp/project', '[]', '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z')`;
       yield* sql`INSERT INTO projection_threads (thread_id, project_id, title, model_selection_json, runtime_mode, interaction_mode, created_at, updated_at)
@@ -81,13 +86,17 @@ it.effect(
         assert.isNotNull(imported[0]?.transcript_imported_at);
         yield* sql`CREATE TABLE v2_work (text TEXT)`;
         yield* sql`INSERT INTO v2_work VALUES ('Keep V2 work')`;
+        assert.equal(
+          (yield* sql`SELECT name FROM effect_sql_migrations WHERE migration_id = 55`)[0]?.name,
+          "OrchestrationV2",
+        );
       }).pipe(Effect.provide(layerImporter));
       assert.deepEqual(NodeFS.readFileSync(sourcePath), original);
       const v1 = new NodeSqlite.DatabaseSync(sourcePath);
       try {
         assert.equal(
           v1.prepare("SELECT MAX(migration_id) AS id FROM effect_sql_migrations").get()?.id,
-          52,
+          forkWorkspace ? 55 : 54,
         );
         assert.equal(
           v1

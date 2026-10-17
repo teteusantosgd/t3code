@@ -26,6 +26,52 @@ const v2TableCount = Effect.gen(function* () {
 });
 
 describe("runMigrations", () => {
+  it.effect("upgrades the retired fork workspace migration without dropping project data", () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      yield* runMigrations({ toMigrationInclusive: 54 });
+      yield* sql`ALTER TABLE projection_projects ADD COLUMN workspace_file TEXT`;
+      yield* sql`ALTER TABLE projection_projects ADD COLUMN repo_roots_json TEXT`;
+      yield* sql`INSERT INTO effect_sql_migrations (migration_id, name) VALUES (55, 'ProjectionProjectsCodeWorkspace')`;
+      yield* sql`INSERT INTO projection_projects (project_id, title, workspace_root, scripts_json, created_at, updated_at, workspace_file, repo_roots_json)
+        VALUES ('project', 'Project', '/tmp/project', '[]', '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z', '/tmp/project.code-workspace', '["/tmp/project"]')`;
+
+      assert.deepStrictEqual(yield* runMigrations(), v2Migrations);
+      assert.deepStrictEqual(yield* history, migrationManifest);
+      assert.isAbove(yield* v2TableCount, 0);
+      assert.deepStrictEqual(
+        yield* sql`SELECT project_id, workspace_root, repo_roots_json FROM projection_projects`,
+        [
+          {
+            project_id: "project",
+            workspace_root: "/tmp/project",
+            repo_roots_json: '["/tmp/project"]',
+          },
+        ],
+      );
+      assert.deepStrictEqual(yield* runMigrations(), []);
+    }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
+  );
+
+  it.effect.each(["missing-columns", "later-migration"])(
+    "refuses an unrecognized fork workspace history: %s",
+    (scenario) =>
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient;
+        yield* runMigrations({ toMigrationInclusive: 54 });
+        yield* sql`INSERT INTO effect_sql_migrations (migration_id, name) VALUES (55, 'ProjectionProjectsCodeWorkspace')`;
+        if (scenario === "later-migration") {
+          yield* sql`ALTER TABLE projection_projects ADD COLUMN workspace_file TEXT`;
+          yield* sql`ALTER TABLE projection_projects ADD COLUMN repo_roots_json TEXT`;
+          yield* sql`INSERT INTO effect_sql_migrations (migration_id, name) VALUES (56, 'UnknownForkMigration')`;
+        }
+        const before = yield* history;
+        assert.isTrue(Exit.isFailure(yield* Effect.exit(runMigrations())));
+        assert.deepStrictEqual(yield* history, before);
+        assert.strictEqual(yield* v2TableCount, 0);
+      }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
+  );
+
   it.effect("migrates a fresh database through the whole manifest", () =>
     Effect.gen(function* () {
       yield* runMigrations();

@@ -28,6 +28,7 @@ import {
   type TerminalEvent,
   type TerminalMetadataStreamEvent,
   type TerminalOpenInput,
+  type TerminalSessionInput,
   type TerminalObserveInput,
   type TerminalResizeInput,
   type ResourceMonitorProcessTableEntry,
@@ -47,7 +48,11 @@ import * as HostProcess from "@t3tools/shared/HostProcess";
 import { mergePathEntries } from "@t3tools/shared/shell";
 
 import { acpRegistryManagedBinaryDirectories } from "@t3tools/provider-acp-registry/server";
-import { getTerminalLabel } from "@t3tools/shared/terminalLabels";
+import {
+  AGENT_TERMINAL_ID_PREFIX,
+  getTerminalLabel,
+  nextAgentTerminalId,
+} from "@t3tools/shared/terminalLabels";
 import * as DateTime from "effect/DateTime";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
@@ -162,6 +167,12 @@ export class TerminalManager extends Context.Service<
       input: TerminalOpenInput,
     ) => Effect.Effect<TerminalSessionSnapshot, TerminalError>;
 
+    /** Open a new agent terminal with the lowest free agent-N id. */
+    readonly openNewTerminal: (
+      input: Omit<TerminalOpenInput, "terminalId">,
+      idPrefix: string,
+    ) => Effect.Effect<TerminalSessionSnapshot, TerminalError>;
+
     /**
      * Attach to a terminal and stream its initial snapshot followed by live events.
      *
@@ -237,6 +248,19 @@ export class TerminalManager extends Context.Service<
     readonly subscribeMetadata: (
       listener: (event: TerminalMetadataStreamEvent) => Effect.Effect<void>,
     ) => Effect.Effect<() => void>;
+
+    /** Read the metadata of every live terminal session. */
+    readonly readAllTerminalMetadata: () => Effect.Effect<ReadonlyArray<TerminalSummary>>;
+
+    /** Read metadata for a terminal, or null when it is absent. */
+    readonly readTerminalMetadata: (
+      input: TerminalSessionInput,
+    ) => Effect.Effect<TerminalSummary | null>;
+
+    /** Read a terminal snapshot, including scrollback, without changing its process. */
+    readonly readTerminalSnapshot: (
+      input: TerminalSessionInput,
+    ) => Effect.Effect<TerminalSessionSnapshot | null>;
   }
 >()("t3/terminal/Manager/TerminalManager") {}
 
@@ -2737,6 +2761,23 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
       resolveLaunchInputEnvironment(input).pipe(Effect.flatMap(openLocked)),
     );
 
+  const openNewTerminal: TerminalManager["Service"]["openNewTerminal"] = (input, idPrefix) =>
+    withThreadLock(
+      input.threadId,
+      Effect.gen(function* () {
+        if (idPrefix !== AGENT_TERMINAL_ID_PREFIX) {
+          return yield* Effect.die(new Error("Only agent terminal ids can be allocated."));
+        }
+        const state = yield* readManagerState;
+        const usedIds = [...state.sessions.values()]
+          .filter((session) => session.threadId === input.threadId)
+          .map((session) => session.terminalId);
+        const terminalId = nextAgentTerminalId(usedIds);
+        const resolvedInput = yield* resolveLaunchInputEnvironment({ ...input, terminalId });
+        return yield* openLocked(resolvedInput);
+      }),
+    );
+
   const openOrAttachForStream = (input: TerminalAttachInput) =>
     withThreadLock(
       input.threadId,
@@ -2789,7 +2830,7 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
       }),
     );
 
-  const readAllTerminalMetadata = () =>
+  const readAllTerminalMetadata: TerminalManager["Service"]["readAllTerminalMetadata"] = () =>
     readManagerState.pipe(
       Effect.map((state) =>
         [...state.sessions.values()]
@@ -2803,12 +2844,14 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
       ),
     );
 
-  const readTerminalMetadata = (input: {
-    readonly threadId: string;
-    readonly terminalId: string;
-  }) =>
+  const readTerminalMetadata: TerminalManager["Service"]["readTerminalMetadata"] = (input) =>
     getSession(input.threadId, input.terminalId).pipe(
       Effect.map((session) => (Option.isSome(session) ? summary(session.value) : null)),
+    );
+
+  const readTerminalSnapshot: TerminalManager["Service"]["readTerminalSnapshot"] = (input) =>
+    getSession(input.threadId, input.terminalId).pipe(
+      Effect.map((session) => (Option.isSome(session) ? snapshot(session.value) : null)),
     );
 
   const subscribe: TerminalManager["Service"]["subscribe"] = (listener) =>
@@ -3211,6 +3254,10 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
     closeIdle,
     subscribe,
     subscribeMetadata,
+    openNewTerminal,
+    readAllTerminalMetadata,
+    readTerminalMetadata,
+    readTerminalSnapshot,
   });
 });
 

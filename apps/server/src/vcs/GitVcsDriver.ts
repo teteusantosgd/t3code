@@ -23,13 +23,17 @@ import {
   type ReviewDiffPreviewResult,
   type ReviewDiffFileContentsInput,
   type ReviewDiffFileContentsResult,
+  type VcsAmendCommitResult,
   type VcsInitInput,
   type VcsListRefsInput,
   type VcsListRefsResult,
   type VcsPullResult,
   type VcsRemoveWorktreeInput,
+  type VcsStashInput,
+  type VcsStashResult,
   type VcsStatusInput,
   type VcsStatusResult,
+  type VcsUndoLastCommitResult,
   type WorktreeSubmodules,
 } from "@t3tools/contracts";
 import {
@@ -77,6 +81,10 @@ export interface GitStatusDetails {
   hasWorkingTreeChanges: boolean;
   workingTree: VcsStatusResult["workingTree"];
   branchChanges?: VcsStatusResult["branchChanges"];
+  /** Index-only changes, always present (empty when the index matches HEAD). */
+  staged?: VcsStatusResult["staged"];
+  /** Worktree and untracked changes that are not in the index, always present. */
+  unstaged?: VcsStatusResult["unstaged"];
   hasUpstream: boolean;
   aheadCount: number;
   behindCount: number;
@@ -320,6 +328,7 @@ export class GitVcsDriver extends Context.Service<
     readonly prepareCommitContext: (
       cwd: string,
       filePaths?: readonly string[],
+      commitScope?: "staged" | "all",
     ) => Effect.Effect<GitPreparedCommitContext | null, GitCommandError>;
     readonly commit: (
       cwd: string,
@@ -355,6 +364,39 @@ export class GitVcsDriver extends Context.Service<
       input: VcsListRefsInput,
     ) => Effect.Effect<VcsListRefsResult, GitCommandError>;
     readonly pullCurrentBranch: (cwd: string) => Effect.Effect<VcsPullResult, GitCommandError>;
+    /** Adds the paths to the index, including untracked files and deletions. */
+    readonly stagePaths: (
+      cwd: string,
+      paths: ReadonlyArray<string>,
+    ) => Effect.Effect<void, GitCommandError>;
+    /** Restores the index entries from HEAD, leaving the worktree untouched. */
+    readonly unstagePaths: (
+      cwd: string,
+      paths: ReadonlyArray<string>,
+    ) => Effect.Effect<void, GitCommandError>;
+    /**
+     * Throws away unstaged work: tracked paths are restored from the index (so
+     * staged work survives) and untracked files are deleted.
+     */
+    readonly discardPaths: (
+      cwd: string,
+      paths: ReadonlyArray<string>,
+    ) => Effect.Effect<void, GitCommandError>;
+    /** Applies one unified-diff hunk to the index. */
+    readonly stageHunk: (cwd: string, patch: string) => Effect.Effect<void, GitCommandError>;
+    /** Reverse-applies one unified-diff hunk to the index. */
+    readonly unstageHunk: (cwd: string, patch: string) => Effect.Effect<void, GitCommandError>;
+    /** Reverse-applies one unified-diff hunk to the worktree. */
+    readonly discardHunk: (cwd: string, patch: string) => Effect.Effect<void, GitCommandError>;
+    readonly stash: (input: VcsStashInput) => Effect.Effect<VcsStashResult, GitCommandError>;
+    readonly amendCommit: (
+      cwd: string,
+      commitMessage?: string,
+    ) => Effect.Effect<VcsAmendCommitResult, GitCommandError>;
+    /** Moves HEAD back one commit, keeping the commit's changes staged. */
+    readonly undoLastCommit: (
+      cwd: string,
+    ) => Effect.Effect<VcsUndoLastCommitResult, GitCommandError>;
     readonly createWorktree: (
       input: VcsCreateWorktreeInput,
       options?: CreateWorktreeOptions,

@@ -28,6 +28,8 @@ import {
   GitPullRequestRefInput,
   GitResolvePullRequestResult,
   GitRunStackedActionInput,
+  GitGenerateCommitMessageInput,
+  GitGenerateCommitMessageResult,
   GitRunStackedActionResult,
   GitStackedAction,
   VcsStatusInput,
@@ -81,7 +83,7 @@ import * as ProviderRegistry from "../provider/ProviderRegistry.ts";
 import { extractBranchNameFromRemoteRef } from "./remoteRefs.ts";
 import { detachStackFrame } from "./detachStackFrame.ts";
 import * as ServerSettings from "../serverSettings.ts";
-import type { GitManagerServiceError } from "@t3tools/contracts";
+import type { GitCommitScope, GitManagerServiceError } from "@t3tools/contracts";
 import * as GitVcsDriver from "../vcs/GitVcsDriver.ts";
 import * as SourceControlProvider from "@t3tools/source-control-core/server/SourceControlProvider";
 import * as SourceControlProviderRegistry from "../sourceControl/SourceControlProviderRegistry.ts";
@@ -163,6 +165,9 @@ export class GitManager extends Context.Service<
       never,
       Scope.Scope
     >;
+    readonly generateCommitMessage: (
+      input: GitGenerateCommitMessageInput,
+    ) => Effect.Effect<GitGenerateCommitMessageResult, GitManagerServiceError>;
   }
 >()("t3/git/GitManager") {}
 
@@ -2055,9 +2060,14 @@ export const make = Effect.gen(function* () {
       /** When true, also produce a semantic feature branch name. */
       includeBranch?: boolean;
       filePaths?: readonly string[];
+      commitScope?: GitCommitScope;
       settings: SourceControlTextGenerationSettings;
     }) {
-      const context = yield* gitCore.prepareCommitContext(input.cwd, input.filePaths);
+      const context = yield* gitCore.prepareCommitContext(
+        input.cwd,
+        input.filePaths,
+        input.commitScope,
+      );
       if (!context) {
         return null;
       }
@@ -2107,6 +2117,7 @@ export const make = Effect.gen(function* () {
     filePaths?: readonly string[],
     progressReporter?: GitActionProgressReporter,
     actionId?: string,
+    commitScope?: GitCommitScope,
   ) {
     const emit = (event: GitActionProgressPayload) =>
       progressReporter && actionId
@@ -2133,6 +2144,7 @@ export const make = Effect.gen(function* () {
         branch,
         ...(commitMessage ? { commitMessage } : {}),
         ...(filePaths ? { filePaths } : {}),
+        ...(commitScope ? { commitScope } : {}),
         settings,
       });
     }
@@ -2192,7 +2204,8 @@ export const make = Effect.gen(function* () {
         : null;
     const { commitSha } = yield* gitCore.commit(cwd, suggestion.subject, suggestion.body, {
       timeoutMs: COMMIT_TIMEOUT_MS,
-      stage: filePaths ? { filePaths } : {},
+      // The index is committed as it stands; any `stage` would git-add again.
+      ...(commitScope === "staged" ? {} : { stage: filePaths ? { filePaths } : {} }),
       ...(commitProgress ? { progress: commitProgress } : {}),
     });
     if (currentHookName !== null) {
@@ -2954,12 +2967,14 @@ export const make = Effect.gen(function* () {
     branch: string | null,
     commitMessage?: string,
     filePaths?: readonly string[],
+    commitScope?: GitCommitScope,
   ) {
     const suggestion = yield* resolveCommitAndBranchSuggestion({
       cwd,
       branch,
       ...(commitMessage ? { commitMessage } : {}),
       ...(filePaths ? { filePaths } : {}),
+      ...(commitScope ? { commitScope } : {}),
       includeBranch: true,
       settings,
     });
@@ -2983,6 +2998,72 @@ export const make = Effect.gen(function* () {
       resolvedCommitMessage: suggestion.commitMessage,
       resolvedCommitSuggestion: suggestion,
     };
+  });
+
+  const sourceControlTextGenerationSettingsFor = Effect.fn(
+    "sourceControlTextGenerationSettingsFor",
+  )(function* (input: { readonly cwd: string; readonly threadId?: ThreadId | undefined }) {
+    return yield* projectSettingsFor(input).pipe(
+      Effect.flatMap(({ settings, projectId }) =>
+        settings.sourceControlWriterModelSelection === null
+          ? Effect.succeed({
+              modelSelection: settings.textGenerationModelSelection,
+              style: settings.sourceControlWritingStyle,
+            })
+          : providerRegistry.getProviders.pipe(
+              Effect.map((providers) => ({
+                modelSelection: ServerSettings.resolveSourceControlWriterModelSelection(
+                  settings,
+                  providers,
+                  projectId,
+                ),
+                style: settings.sourceControlWritingStyle,
+              })),
+            ),
+      ),
+      Effect.mapError(
+        (cause) =>
+          new GitManagerError({
+            operation: "runStackedAction",
+            cwd: input.cwd,
+            detail: "Failed to get server settings.",
+            cause,
+          }),
+      ),
+    );
+  });
+
+  const generateCommitMessage: GitManager["Service"]["generateCommitMessage"] = Effect.fn(
+    "GitManager.generateCommitMessage",
+  )(function* (input) {
+    // Review reads use a temporary index for untracked files; staging is left intact.
+    const preview = yield* gitCore.getReviewDiffPreview({
+      cwd: input.cwd,
+      ...(input.scope === "staged" ? { sourceKind: "staged" } : {}),
+    });
+    const source = preview.sources.find(
+      (source) => source.kind === (input.scope === "staged" ? "staged" : "working-tree"),
+    );
+    if (!source?.diff.trim()) return { message: null };
+
+    const settings = yield* sourceControlTextGenerationSettingsFor(input);
+    const policy = yield* resolveStylePolicy(input.cwd, settings);
+    const status = yield* gitCore.statusDetailsLocal(input.cwd);
+    const generated = yield* textGeneration.generateCommitMessage({
+      cwd: input.cwd,
+      branch: status.branch,
+      stagedSummary: limitContext(
+        (source.files ?? [])
+          .map((file) => `${file.path}\t+${file.additions} -${file.deletions}`)
+          .join("\n"),
+        8_000,
+      ),
+      stagedPatch: limitContext(source.diff, 50_000),
+      ...(policy ? { policy } : {}),
+      modelSelection: settings.modelSelection,
+    });
+    const { subject, body } = sanitizeCommitMessage(generated);
+    return { message: formatCommitMessage(subject, body) };
   });
 
   const runStackedAction: GitManager["Service"]["runStackedAction"] = Effect.fn("runStackedAction")(
@@ -3042,34 +3123,7 @@ export const make = Effect.gen(function* () {
         let commitMessageForStep = input.commitMessage;
         let preResolvedCommitSuggestion: CommitAndBranchSuggestion | undefined = undefined;
 
-        const textGenerationSettings = yield* projectSettingsFor(input).pipe(
-          Effect.flatMap(({ settings, projectId }) =>
-            settings.sourceControlWriterModelSelection === null
-              ? Effect.succeed({
-                  modelSelection: settings.textGenerationModelSelection,
-                  style: settings.sourceControlWritingStyle,
-                })
-              : providerRegistry.getProviders.pipe(
-                  Effect.map((providers) => ({
-                    modelSelection: ServerSettings.resolveSourceControlWriterModelSelection(
-                      settings,
-                      providers,
-                      projectId,
-                    ),
-                    style: settings.sourceControlWritingStyle,
-                  })),
-                ),
-          ),
-          Effect.mapError(
-            (cause) =>
-              new GitManagerError({
-                operation: "runStackedAction",
-                cwd: input.cwd,
-                detail: "Failed to get server settings.",
-                cause,
-              }),
-          ),
-        );
+        const textGenerationSettings = yield* sourceControlTextGenerationSettingsFor(input);
 
         if (input.featureBranch) {
           yield* Ref.set(currentPhase, Option.some("branch"));
@@ -3084,6 +3138,7 @@ export const make = Effect.gen(function* () {
             initialStatus.branch,
             input.commitMessage,
             input.filePaths,
+            input.commitScope,
           );
           branchStep = result.branchStep;
           commitMessageForStep = result.resolvedCommitMessage;
@@ -3116,6 +3171,7 @@ export const make = Effect.gen(function* () {
                   input.filePaths,
                   options?.progressReporter,
                   progress.actionId,
+                  input.commitScope,
                 ),
               ),
             )
@@ -3198,6 +3254,7 @@ export const make = Effect.gen(function* () {
     invalidateStatus,
     resolvePullRequest,
     preparePullRequestThread,
+    generateCommitMessage,
     runStackedAction,
     subscribePullRequestStateChanges: PubSub.subscribe(pullRequestStateChanges).pipe(
       Effect.map((subscription) => Stream.fromSubscription(subscription)),

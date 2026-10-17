@@ -2,6 +2,10 @@ import type { ProviderInteractionMode } from "@t3tools/contracts";
 
 export const T3_CODE_ORCHESTRATION_INSTRUCTIONS = `
 
+## T3 Code terminals
+
+When the MCP server grants terminal_* tools, run persistent servers and workers in those shared terminals so the user can watch their output. Call terminal_list first, open an agent terminal for each busy process, start it with terminal_write and inspect logs with terminal_read. Only agent-N terminals accept your input; user terminals are read-only. Keep these processes running when the user needs them and report the terminal id. Short-lived commands can use your normal shell.
+
 ## T3 Code orchestration
 
 The \`t3-code\` MCP server provides app-owned orchestration. Treat these concepts distinctly:

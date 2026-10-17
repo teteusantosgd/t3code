@@ -25,6 +25,8 @@ import { ChildProcess, ChildProcessSpawner } from "effect/process";
 import {
   GitCommandError,
   ReviewDiffPreviewInput,
+  VcsHunkInput,
+  VcsPathsInput,
   type ReviewDiffFileContentsInput,
   type ReviewDiffPreviewResult,
   type WorktreeSubmodules,
@@ -34,12 +36,80 @@ import { gitCommandDuration } from "../observability/Metrics.ts";
 import {
   makeGitVcsDriverCore,
   parseGitCheckoutProgressLine,
+  decodeGitQuotedPath,
+  parsePorcelainV2Changes,
   splitNullSeparatedGitStdoutPaths,
   windowsLongPathConfigEnv,
 } from "./GitVcsDriverCore.ts";
 import * as GitVcsDriver from "./GitVcsDriver.ts";
 
+const decodeVcsHunkInput = Schema.decodeUnknownEffect(VcsHunkInput);
+const decodeVcsPathsInput = Schema.decodeUnknownEffect(VcsPathsInput);
 const encodeGitCommandError = Schema.encodeEffect(Schema.fromJsonString(GitCommandError));
+
+describe("parsePorcelainV2Changes", () => {
+  const ordinary = (xy: string, filePath: string) =>
+    `1 ${xy} N... 100644 100644 100644 0000000 1111111 ${filePath}`;
+
+  it("maps index and worktree letters into staged and unstaged lists", () => {
+    const stdout = [
+      "# branch.head main",
+      ordinary("M.", "staged-only.ts"),
+      ordinary(".M", "unstaged-only.ts"),
+      ordinary("MM", "both.ts"),
+      ordinary("A.", "added.ts"),
+      ordinary(".D", "deleted-unstaged.ts"),
+      "? untracked.txt",
+    ].join("\n");
+
+    const { staged, unstaged } = parsePorcelainV2Changes(stdout);
+
+    assert.deepEqual(
+      staged.map((entry) => ({ path: entry.path, status: entry.status })),
+      [
+        { path: "staged-only.ts", status: "M" },
+        { path: "both.ts", status: "M" },
+        { path: "added.ts", status: "A" },
+      ],
+    );
+    assert.deepEqual(
+      unstaged.map((entry) => ({ path: entry.path, status: entry.status })),
+      [
+        { path: "unstaged-only.ts", status: "M" },
+        { path: "both.ts", status: "M" },
+        { path: "deleted-unstaged.ts", status: "D" },
+        { path: "untracked.txt", status: "?" },
+      ],
+    );
+  });
+
+  it("keeps leading spaces and decodes quoted paths", () => {
+    const stdout = [
+      ordinary(".M", " leading.txt"),
+      ordinary("A.", '"tab\\tand\\nnewline.txt"'),
+      '? "caf\\303\\251.txt"',
+      "? spaced name.txt",
+    ].join("\n");
+    const { staged, unstaged } = parsePorcelainV2Changes(stdout);
+    assert.deepEqual(
+      staged.map((entry) => entry.path),
+      ["tab\tand\nnewline.txt"],
+    );
+    assert.deepEqual(
+      unstaged.map((entry) => entry.path),
+      [" leading.txt", "café.txt", "spaced name.txt"],
+    );
+    assert.equal(decodeGitQuotedPath('"quo\\"te\\\\"'), 'quo"te\\');
+    assert.equal(decodeGitQuotedPath("plain"), "plain");
+  });
+
+  it("reports unmerged paths on the unstaged side", () => {
+    const stdout = "u UU N... 100644 100644 100644 100644 0000000 1111111 2222222 conflict.ts";
+    const { staged, unstaged } = parsePorcelainV2Changes(stdout);
+    assert.deepEqual(staged, []);
+    assert.deepEqual(unstaged, [{ path: "conflict.ts", status: "U" }]);
+  });
+});
 
 const layerServerConfig = ServerConfig.layerTest(process.cwd(), {
   prefix: "t3-git-vcs-driver-test-",
@@ -149,6 +219,65 @@ const initRepoWithCommit = (
     const initialBranch = yield* git(cwd, ["branch", "--show-current"]);
     return { initialBranch };
   });
+
+it.effect("keeps staged and unstaged previews and expansion contents separate", () =>
+  Effect.gen(function* () {
+    const cwd = yield* makeTmpDir();
+    yield* initRepoWithCommit(cwd);
+    const driver = yield* GitVcsDriver.GitVcsDriver;
+    yield* writeTextFile(cwd, "README.md", "# staged\n");
+    yield* driver.stagePaths(cwd, ["README.md"]);
+    yield* writeTextFile(cwd, "README.md", "# unstaged\n");
+    for (const sourceKind of ["staged", "unstaged"] as const) {
+      const preview = yield* driver.getReviewDiffPreview({
+        cwd,
+        file: { path: "README.md", previousPath: null, sourceKind },
+      });
+      assert.lengthOf(preview.sources, 1);
+      assert.equal(preview.sources[0]?.kind, sourceKind);
+      assert.include(
+        preview.sources[0]?.diff ?? "",
+        sourceKind === "staged" ? "+# staged" : "+# unstaged",
+      );
+      const contents = yield* driver.getReviewDiffFileContents({
+        cwd,
+        sourceKind,
+        changeType: "change",
+        baseRef: null,
+        headRef: null,
+        oldPath: "README.md",
+        newPath: "README.md",
+      });
+      assert.deepStrictEqual(
+        contents,
+        sourceKind === "staged"
+          ? { oldContents: "# test\n", newContents: "# staged\n" }
+          : { oldContents: "# staged\n", newContents: "# unstaged\n" },
+      );
+    }
+    yield* driver.discardPaths(cwd, ["README.md"]);
+    const staged = yield* driver.getReviewDiffPreview({ cwd, sourceKind: "staged" });
+    assert.include(staged.sources[0]?.diff ?? "", "+# staged");
+    yield* driver.unstagePaths(cwd, ["README.md"]);
+    assert.equal(yield* git(cwd, ["diff", "--cached", "--name-only"]), "");
+  }).pipe(Effect.scoped, Effect.provide(layerTest)),
+);
+
+it.effect("previews untracked files without changing the repository index", () =>
+  Effect.gen(function* () {
+    const cwd = yield* makeTmpDir();
+    yield* initRepoWithCommit(cwd);
+    const driver = yield* GitVcsDriver.GitVcsDriver;
+    yield* writeTextFile(cwd, "new.txt", "new content\n");
+    const preview = yield* driver.getReviewDiffPreview({
+      cwd,
+      file: { path: "new.txt", previousPath: null, sourceKind: "unstaged" },
+    });
+    assert.include(preview.sources[0]?.diff ?? "", "+new content");
+    assert.equal(yield* git(cwd, ["diff", "--cached", "--name-only"]), "");
+    assert.include(yield* git(cwd, ["status", "--short"]), "?? new.txt");
+  }).pipe(Effect.scoped, Effect.provide(layerTest)),
+);
 
 it.effect("bounds Git bursts across drivers without timing out queued commands", () =>
   Effect.gen(function* () {
@@ -2056,7 +2185,11 @@ it.layer(layerTest)("GitVcsDriver core integration", (it) => {
         });
         const branch = preview.sources.find((source) => source.kind === "branch-range")!;
         for (const path of ["renamed.md", "[literal].txt", " leading.txt", "mode-only.sh"]) {
-          const stat = branch.files!.find((file) => file.path === path)!;
+          const stat = branch.files!.find((file) => file.path === path);
+          assert.isDefined(
+            stat,
+            `Missing ${JSON.stringify(path)} in ${JSON.stringify(branch.files)}`,
+          );
           const request = yield* Schema.decodeEffect(ReviewDiffPreviewInput)({
             cwd,
             baseRef: initialBranch,
@@ -2788,6 +2921,42 @@ it.layer(layerTest)("GitVcsDriver core integration", (it) => {
         // Combined net from HEAD: +2 insertions.
         assert.equal(file.insertions, 2);
         assert.equal(file.deletions, 0);
+        assert.deepEqual(status.staged?.files, [
+          { path: "feature.ts", status: "M", insertions: 2, deletions: 0 },
+        ]);
+        assert.deepEqual(status.unstaged?.files, [
+          { path: "feature.ts", status: "M", insertions: 2, deletions: 0 },
+        ]);
+      }),
+    );
+
+    it.effect("stagePaths and unstagePaths move files between staged and unstaged groups", () =>
+      Effect.gen(function* () {
+        const cwd = yield* makeTmpDir();
+        const driver = yield* GitVcsDriver.GitVcsDriver;
+        yield* initRepoWithCommit(cwd);
+        yield* writeTextFile(cwd, "tracked.txt", "one\n");
+        yield* writeTextFile(cwd, "other.txt", "other\n");
+
+        let status = yield* driver.statusDetails(cwd);
+        assert.equal(status.staged?.files.length, 0);
+        assert.equal(status.unstaged?.files.length, 2);
+
+        yield* driver.stagePaths(cwd, ["tracked.txt"]);
+        status = yield* driver.statusDetails(cwd);
+        assert.deepEqual(
+          status.staged?.files.map((file) => ({ path: file.path, status: file.status })),
+          [{ path: "tracked.txt", status: "A" }],
+        );
+        assert.deepEqual(
+          status.unstaged?.files.map((file) => ({ path: file.path, status: file.status })),
+          [{ path: "other.txt", status: "?" }],
+        );
+
+        yield* driver.unstagePaths(cwd, ["tracked.txt"]);
+        status = yield* driver.statusDetails(cwd);
+        assert.equal(status.staged?.files.length, 0);
+        assert.equal(status.unstaged?.files.length, 2);
       }),
     );
 
@@ -3703,6 +3872,123 @@ it.layer(layerTest)("GitVcsDriver core integration", (it) => {
         const status = yield* git(cwd, ["status", "--porcelain"]);
         assert.include(status, "?? b.txt");
         assert.notInclude(status, "a.txt");
+      }),
+    );
+
+    it.effect("staged scope commits the index and leaves the working tree alone", () =>
+      Effect.gen(function* () {
+        const cwd = yield* makeTmpDir();
+        yield* initRepoWithCommit(cwd);
+        const driver = yield* GitVcsDriver.GitVcsDriver;
+
+        yield* writeTextFile(cwd, "a.txt", "base\n");
+        yield* git(cwd, ["add", "a.txt"]);
+        yield* git(cwd, ["commit", "-m", "add a"]);
+        yield* writeTextFile(cwd, "a.txt", "index\n");
+        yield* git(cwd, ["add", "a.txt"]);
+        yield* writeTextFile(cwd, "a.txt", "worktree\n");
+
+        const staged = yield* driver.prepareCommitContext(cwd, undefined, "staged");
+        assert.include(staged?.stagedPatch ?? "", "+index");
+        assert.notInclude(staged?.stagedPatch ?? "", "+worktree");
+        assert.equal(yield* git(cwd, ["show", ":a.txt"]), "index");
+
+        yield* driver.commit(cwd, "Commit index", "");
+        assert.equal(yield* git(cwd, ["show", "HEAD:a.txt"]), "index");
+        const fileSystem = yield* FileSystem.FileSystem;
+        const pathService = yield* Path.Path;
+        assert.equal(
+          yield* fileSystem.readFileString(pathService.join(cwd, "a.txt")),
+          "worktree\n",
+        );
+        assert.include(yield* git(cwd, ["status", "--porcelain"]), "M a.txt");
+      }),
+    );
+
+    it.effect("all scope still stages the working tree before committing", () =>
+      Effect.gen(function* () {
+        const cwd = yield* makeTmpDir();
+        yield* initRepoWithCommit(cwd);
+        const driver = yield* GitVcsDriver.GitVcsDriver;
+
+        yield* writeTextFile(cwd, "a.txt", "base\n");
+        yield* git(cwd, ["add", "a.txt"]);
+        yield* git(cwd, ["commit", "-m", "add a"]);
+        yield* writeTextFile(cwd, "a.txt", "index\n");
+        yield* git(cwd, ["add", "a.txt"]);
+        yield* writeTextFile(cwd, "a.txt", "worktree\n");
+
+        const all = yield* driver.prepareCommitContext(cwd, undefined, "all");
+        assert.include(all?.stagedPatch ?? "", "+worktree");
+        assert.equal(yield* git(cwd, ["show", ":a.txt"]), "index");
+
+        yield* driver.commit(cwd, "Commit all", "", { stage: {} });
+        assert.equal(yield* git(cwd, ["show", "HEAD:a.txt"]), "worktree");
+        assert.equal(yield* git(cwd, ["status", "--porcelain"]), "");
+      }),
+    );
+
+    it.effect("hunk inputs keep the patch's final newline through the decoder", () =>
+      Effect.gen(function* () {
+        const cwd = yield* makeTmpDir();
+        yield* initRepoWithCommit(cwd);
+        const driver = yield* GitVcsDriver.GitVcsDriver;
+        const fileSystem = yield* FileSystem.FileSystem;
+        const pathService = yield* Path.Path;
+
+        yield* writeTextFile(cwd, "h.txt", "one\ntwo\nthree\n");
+        yield* git(cwd, ["add", "h.txt"]);
+        yield* git(cwd, ["commit", "-m", "add h"]);
+        yield* writeTextFile(cwd, "h.txt", "one\nTWO\nthree\n");
+
+        const patch = [
+          "diff --git a/h.txt b/h.txt",
+          "--- a/h.txt",
+          "+++ b/h.txt",
+          "@@ -1,3 +1,3 @@",
+          " one",
+          "-two",
+          "+TWO",
+          " three",
+          "",
+        ].join("\n");
+        const input = yield* decodeVcsHunkInput({
+          cwd,
+          action: "stage",
+          path: "h.txt",
+          patch,
+        });
+        assert.equal(input.patch, patch);
+
+        yield* driver.stageHunk(cwd, input.patch);
+        assert.equal(yield* git(cwd, ["diff", "--cached", "--name-only"]), "h.txt");
+        yield* driver.unstageHunk(cwd, input.patch);
+        assert.equal(yield* git(cwd, ["diff", "--cached", "--name-only"]), "");
+        yield* driver.discardHunk(cwd, input.patch);
+        assert.equal(
+          yield* fileSystem.readFileString(pathService.join(cwd, "h.txt")),
+          "one\ntwo\nthree\n",
+        );
+      }),
+    );
+
+    it.effect("path inputs keep leading and trailing spaces through the decoder", () =>
+      Effect.gen(function* () {
+        const paths = [" lead.txt", "trail.txt ", " both [1] ", "with\ttab.txt"];
+        const input = yield* decodeVcsPathsInput({
+          cwd: "/tmp/repo",
+          action: "stage",
+          paths,
+        });
+        assert.deepEqual(input.paths, paths);
+        const hunk = yield* decodeVcsHunkInput({
+          cwd: "/tmp/repo",
+          action: "discard",
+          path: " lead.txt",
+          patch: "x\n",
+        });
+        assert.equal(hunk.path, " lead.txt");
+        assert.equal(hunk.patch, "x\n");
       }),
     );
 

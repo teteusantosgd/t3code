@@ -8,6 +8,7 @@ import {
 } from "./Sidebar.drag";
 import {
   resolveSidebarDropTarget,
+  sidebarItemBelongsToHistory,
   sidebarListItemId,
   sidebarMarkerId,
   type SidebarListItem,
@@ -37,7 +38,9 @@ function layout(
   const rects = items.map((item) => {
     const height =
       item.kind === "thread"
-        ? (item.section === "pinned" || item.section === "active" ? cardHeight : 36) * scale
+        ? (item.section === "pinned" || item.section === "active" || item.section === "working"
+            ? cardHeight
+            : 36) * scale
         : item.marker === "pinned-header" || item.marker === "pinned-divider"
           ? 0
           : (item.marker.endsWith("placeholder") ? 0 : 32) * scale;
@@ -847,6 +850,98 @@ describe("sidebar drag projection", () => {
     );
     expect(result.get(sidebarMarkerId("snoozed-header"))).toEqual({ ...stationary, y: 83 });
     expect(result.get(sidebarMarkerId("settled-header"))?.y).toBe(46);
+  });
+});
+
+describe("sidebar drag projection (inverted)", () => {
+  const invert = (items: readonly SidebarListItem[]): SidebarListItem[] => [
+    ...items.filter(sidebarItemBelongsToHistory),
+    ...items.filter((item) => !sidebarItemBelongsToHistory(item)),
+  ];
+
+  it("projects a work reorder without moving history", () => {
+    const canonical = [
+      pinnedHeader,
+      thread("p", "pinned"),
+      divider,
+      thread("a1", "active"),
+      thread("a2", "active"),
+      settledHeader,
+      thread("s", "settled"),
+    ];
+    const result = preview(
+      {
+        items: invert(canonical),
+        dropItems: canonical,
+        inverted: true,
+        settledOrder: ["s"],
+        settledExpanded: true,
+      },
+      "a2",
+      "a1",
+    );
+    expect(result.get("a2")).toEqual(stationary);
+    expect(result.get("a1")?.y).toBe(83);
+    expect(result.get(sidebarMarkerId("settled-header"))).toEqual(stationary);
+    expect(result.get("s")).toEqual(stationary);
+  });
+
+  it("keeps Working in the work block and previews its time-ordered row", () => {
+    const canonical = [
+      pinnedHeader,
+      thread("p", "pinned"),
+      divider,
+      thread("a1", "active"),
+      thread("a2", "active"),
+      marker("working-header"),
+      thread("w", "working"),
+      settledHeader,
+      thread("s", "settled"),
+    ];
+    const result = preview(
+      {
+        items: invert(canonical),
+        dropItems: canonical,
+        inverted: true,
+        activeOrder: ["a2", "a1", "p"],
+        settledOrder: ["s"],
+        settledExpanded: true,
+      },
+      "p",
+      "a1",
+    );
+    expect(result.get("a2")?.y).toBe(-83);
+    expect(result.get(sidebarMarkerId("working-header"))).toEqual(stationary);
+    expect(result.get("w")).toEqual(stationary);
+    expect(result.get(sidebarMarkerId("settled-header"))).toEqual(stationary);
+    expect(result.get("s")).toEqual(stationary);
+  });
+
+  it("projects history reorder without moving work", () => {
+    const canonical = [
+      pinnedHeader,
+      thread("p", "pinned"),
+      divider,
+      thread("a", "active"),
+      settledHeader,
+      thread("s1", "settled"),
+      thread("s2", "settled"),
+    ];
+    const result = preview(
+      {
+        items: invert(canonical),
+        dropItems: canonical,
+        inverted: true,
+        settledOrder: ["s2", "s1"],
+        settledExpanded: true,
+      },
+      "s2",
+      "s1",
+    );
+    expect(result.get("s2")).toEqual(stationary);
+    expect(result.get("s1")?.y).toBe(37);
+    expect(result.get(sidebarMarkerId("pinned-header"))).toEqual(stationary);
+    expect(result.get("p")).toEqual(stationary);
   });
 });
 

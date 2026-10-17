@@ -5,6 +5,7 @@ import {
   type GitActionProgressEvent,
   type GitRunStackedActionInput,
   type GitRunStackedActionResult,
+  type GitCommitScope,
   GitStackedAction,
   type ThreadId,
   type ProjectId,
@@ -79,6 +80,7 @@ export interface RunVcsStackedActionInput {
   readonly commitMessage?: string;
   readonly featureBranch?: boolean;
   readonly filePaths?: ReadonlyArray<string>;
+  readonly commitScope?: GitCommitScope;
   /** The thread the action runs beside; the server links a pull request it creates to it. */
   readonly threadId?: ThreadId;
   readonly projectId?: ProjectId;
@@ -472,6 +474,7 @@ export function createVcsActionManager<R, E>(
           ...(input.commitMessage ? { commitMessage: input.commitMessage } : {}),
           ...(input.featureBranch ? { featureBranch: true } : {}),
           ...(input.filePaths?.length ? { filePaths: [...input.filePaths] } : {}),
+          ...(input.commitScope ? { commitScope: input.commitScope } : {}),
           ...(input.threadId !== undefined ? { threadId: input.threadId } : {}),
           ...(input.projectId !== undefined ? { projectId: input.projectId } : {}),
         };

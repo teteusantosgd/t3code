@@ -1,3 +1,4 @@
+import { isAgentTerminalId } from "@t3tools/shared/terminalLabels";
 import * as Option from "effect/Option";
 import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/shell";
 import {
@@ -1344,4 +1345,18 @@ export function restorePlanFollowUpComposer(input: {
     prompt: input.snapshot.prompt,
     detectTrigger: true,
   });
+}
+
+/** Reveal newly created agent terminals without reopening a restored roster. */
+export function selectAgentTerminalsToReveal(
+  previous: ReadonlySet<string> | undefined,
+  terminalIds: ReadonlyArray<string>,
+): { readonly reveal: ReadonlyArray<string>; readonly seen: ReadonlySet<string> } {
+  return {
+    seen: new Set(terminalIds),
+    reveal:
+      previous === undefined
+        ? []
+        : terminalIds.filter((id) => isAgentTerminalId(id) && !previous.has(id)),
+  };
 }

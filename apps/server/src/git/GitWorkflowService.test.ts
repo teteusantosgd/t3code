@@ -76,6 +76,8 @@ describe("GitWorkflowService", () => {
           insertions: 0,
           deletions: 0,
         },
+        staged: { files: [], insertions: 0, deletions: 0 },
+        unstaged: { files: [], insertions: 0, deletions: 0 },
       });
     }).pipe(
       Effect.provide(
@@ -102,6 +104,8 @@ describe("GitWorkflowService", () => {
           insertions: 0,
           deletions: 0,
         },
+        staged: { files: [], insertions: 0, deletions: 0 },
+        unstaged: { files: [], insertions: 0, deletions: 0 },
         hasUpstream: false,
         aheadCount: 0,
         behindCount: 0,

@@ -9,6 +9,12 @@ export function createGitEnvironmentAtoms<R, E>(
   runtime: Atom.AtomRuntime<EnvironmentRegistry | R, E>,
 ) {
   return {
+    generateCommitMessage: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:git:generate-commit-message",
+      tag: WS_METHODS.gitGenerateCommitMessage,
+      scheduler: vcsCommandScheduler,
+      concurrency: vcsCommandConcurrency,
+    }),
     pullRequestResolution: createEnvironmentRpcQueryAtomFamily(runtime, {
       label: "environment-data:git:resolve-pull-request",
       tag: WS_METHODS.gitResolvePullRequest,

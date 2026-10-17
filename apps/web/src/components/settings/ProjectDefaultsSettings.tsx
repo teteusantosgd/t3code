@@ -82,6 +82,7 @@ export function ProjectDefaultsSettings({ category }: { category: ProjectSetting
   const PermissionIcon = runtimeModeConfig[settings.defaultRuntimeMode].icon;
   const mixedWorkspace = useScopedSettingsMixed(["defaultThreadEnvMode"]);
   const mixedSubmodules = useScopedSettingsMixed(["worktreeSubmodules"]);
+  const mixedTerminal = useScopedSettingsMixed(["enableAgentTerminalAccess"]);
   const mixedBrowser = useScopedSettingsMixed(["enableAgentBrowserAccess"]);
   const mixedAutoPull = useScopedSettingsMixed(["defaultAutoPull"]);
   const mixedAgentCredits = useScopedSettingsMixed(["removeAgentCreditsOnMerge"]);
@@ -527,6 +528,41 @@ export function ProjectDefaultsSettings({ category }: { category: ProjectSetting
                 mixed={mixedBrowser}
                 checked={mixedBrowser ? false : settings.enableAgentBrowserAccess}
                 onCheckedChange={(enabled) => updateSettings({ enableAgentBrowserAccess: enabled })}
+              />
+            }
+          />
+          <SettingsRow
+            serverScoped
+            settingKeys={["enableAgentTerminalAccess"]}
+            mixed={mixedTerminal}
+            id={searchableSetting("agent-terminal-access").id}
+            title="Agent terminal access"
+            description={
+              isProjectScope
+                ? "Allow agents in this project to use shared terminals with full-access permissions. Applies when the agent session next starts."
+                : "Allow agents to use shared terminals with full-access permissions. Projects can override it."
+            }
+            resetAction={
+              settings.enableAgentTerminalAccess !==
+              DEFAULT_SERVER_SETTINGS.enableAgentTerminalAccess ? (
+                <SettingResetButton
+                  label="default terminal access"
+                  onClick={() =>
+                    updateSettings({
+                      enableAgentTerminalAccess: DEFAULT_SERVER_SETTINGS.enableAgentTerminalAccess,
+                    })
+                  }
+                />
+              ) : null
+            }
+            control={
+              <Switch
+                aria-label="Agent terminal access"
+                mixed={mixedTerminal}
+                checked={mixedTerminal ? false : settings.enableAgentTerminalAccess}
+                onCheckedChange={(enabled) =>
+                  updateSettings({ enableAgentTerminalAccess: enabled })
+                }
               />
             }
           />

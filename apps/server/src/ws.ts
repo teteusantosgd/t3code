@@ -2834,6 +2834,29 @@ const layerWsRpc = (
                 refreshGitStatus(input.cwd).pipe(Effect.ignore({ log: true }), Effect.as(result)),
             }),
           ),
+        [WS_METHODS.vcsPush]: (input) =>
+          gitWorkflow
+            .pushCurrentBranch(input.cwd)
+            .pipe(Effect.tap(() => refreshGitStatus(input.cwd))),
+        [WS_METHODS.vcsSync]: (input) =>
+          gitWorkflow
+            .syncCurrentBranch(input.cwd)
+            .pipe(Effect.tap(() => refreshGitStatus(input.cwd))),
+        [WS_METHODS.vcsPaths]: (input) =>
+          gitWorkflow[`${input.action}Paths`](input).pipe(
+            Effect.tap(() => refreshGitStatus(input.cwd)),
+          ),
+        [WS_METHODS.vcsHunk]: (input) =>
+          gitWorkflow[`${input.action}Hunk`](input).pipe(
+            Effect.tap(() => refreshGitStatus(input.cwd)),
+          ),
+        [WS_METHODS.vcsStash]: (input) =>
+          gitWorkflow.stash(input).pipe(Effect.tap(() => refreshGitStatus(input.cwd))),
+        [WS_METHODS.vcsAmendCommit]: (input) =>
+          gitWorkflow.amendCommit(input).pipe(Effect.tap(() => refreshGitStatus(input.cwd))),
+        [WS_METHODS.vcsUndoLastCommit]: (input) =>
+          gitWorkflow.undoLastCommit(input.cwd).pipe(Effect.tap(() => refreshGitStatus(input.cwd))),
+        [WS_METHODS.gitGenerateCommitMessage]: (input) => gitWorkflow.generateCommitMessage(input),
         [WS_METHODS.gitRunStackedAction]: (input) =>
           Stream.callback<GitActionProgressEvent, GitManagerServiceError>((queue) =>
             gitWorkflow

@@ -11,6 +11,10 @@ export const PIERRE_TREE_UNSAFE_CSS = `
     --trees-font-size-override: 0.75rem;
   }
   button[data-type='item'], button[data-type='item']::before { border-radius: var(--radius-md); }
+  /* Pierre can show a truncation marker at fractional zoom before text wraps. */
+  @container measure (height < 1.5lh) {
+    [data-truncate-marker] { opacity: 0; }
+  }
   svg[data-icon-name='t3-tree-icon-loading'] { opacity: 0.6; }
   @media (prefers-reduced-motion: no-preference) {
     svg[data-icon-name='t3-tree-icon-loading'] { animation: t3-tree-spin 1s linear infinite; }

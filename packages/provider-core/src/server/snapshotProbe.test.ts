@@ -11,11 +11,75 @@ import * as ChildProcess from "effect/process/ChildProcess";
 import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner";
 
 import {
+  buildServerProvider,
   isCommandMissingCause,
   parseGenericCliVersion,
   providerModelsFromSettings,
   spawnAndCollect,
 } from "./snapshotProbe.ts";
+
+describe("buildServerProvider effort labels", () => {
+  it("normalizes only xhigh labels and preserves option ids", () => {
+    const models = [
+      ["one", "Extra High"],
+      ["two", "Extra-High"],
+      ["three", "xhigh"],
+    ].map(([slug, label]) => ({
+      slug: slug!,
+      name: slug!,
+      isCustom: false,
+      capabilities: createModelCapabilities({
+        optionDescriptors: [
+          {
+            id: "reasoningEffort",
+            label: "Effort",
+            type: "select" as const,
+            options: [
+              { id: "xhigh", label: label!, isDefault: false },
+              { id: "high", label: "Extra High", isDefault: true },
+            ],
+          },
+        ],
+      }),
+    }));
+    const provider = buildServerProvider({
+      presentation: { displayName: "Test" },
+      enabled: true,
+      checkedAt: "2026-10-17T00:00:00.000Z",
+      models,
+      probe: {
+        installed: true,
+        version: "1.0.0",
+        status: "ready",
+        auth: { status: "authenticated" },
+      },
+    });
+
+    expect(
+      provider.models.map((model) =>
+        model.capabilities?.optionDescriptors?.find((descriptor) => descriptor.type === "select")
+          ?.type === "select"
+          ? model.capabilities.optionDescriptors
+              .find((descriptor) => descriptor.type === "select")
+              ?.options.map(({ id, label }) => ({ id, label }))
+          : [],
+      ),
+    ).toEqual([
+      [
+        { id: "xhigh", label: "XHigh" },
+        { id: "high", label: "Extra High" },
+      ],
+      [
+        { id: "xhigh", label: "XHigh" },
+        { id: "high", label: "Extra High" },
+      ],
+      [
+        { id: "xhigh", label: "XHigh" },
+        { id: "high", label: "Extra High" },
+      ],
+    ]);
+  });
+});
 
 const OPENCODE_CUSTOM_MODEL_CAPABILITIES: ModelCapabilities = createModelCapabilities({
   optionDescriptors: [

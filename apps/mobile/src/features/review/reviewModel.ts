@@ -6,7 +6,7 @@ import * as Arr from "effect/Array";
 import { pipe } from "effect/Function";
 import * as Order from "effect/Order";
 
-export type ReviewSectionKind = "turn" | "working-tree" | "branch-range";
+export type ReviewSectionKind = "turn" | "working-tree" | "branch-range" | "staged" | "unstaged";
 
 const CHANGES_SECTION_ID = "git:branch-range";
 const CHANGES_TITLE = "Changes";

@@ -553,6 +553,7 @@ import {
   prepareRevertedMessageAttachments,
   waitForRevertedMessage,
   reconcileMountedTerminalThreadIds,
+  selectAgentTerminalsToReveal,
   resolveComposerInteractionMode,
   resolveComposerProviderSelection,
   getAntigravitySendBlockReason,
@@ -713,6 +714,7 @@ const PreviewPanel = lazy(() =>
   import("./preview/PreviewPanel").then((module) => ({ default: module.PreviewPanel })),
 );
 const DiffPanel = lazy(() => import("./DiffPanel"));
+const ChangesPanel = lazy(() => import("./ChangesPanel"));
 const selectAutoShowFloatingPreview = (settings: { browserAutoShowFloatingPreview: boolean }) =>
   settings.browserAutoShowFloatingPreview;
 const DevicePanel = lazy(() =>
@@ -2359,6 +2361,23 @@ export default function ChatView(props: ChatViewProps) {
   }, [activeThreadKnownSessions]);
   const activeThreadRef = useActiveThreadRef(activeThread);
   const activeThreadKey = activeThreadRef ? scopedThreadKey(activeThreadRef) : null;
+  const seenAgentTerminalIdsRef = useRef(new Map<string, ReadonlySet<string>>());
+  useEffect(() => {
+    if (!activeThreadRef || !activeThreadKey || activeThreadKnownSessionsRaw === null) return;
+    const { reveal, seen } = selectAgentTerminalsToReveal(
+      seenAgentTerminalIdsRef.current.get(activeThreadKey),
+      activeServerOrderedTerminalIds,
+    );
+    seenAgentTerminalIdsRef.current.set(activeThreadKey, seen);
+    const newest = reveal.at(-1);
+    if (newest) useRightPanelStore.getState().openTerminal(activeThreadRef, newest);
+  }, [
+    activeServerOrderedTerminalIds,
+    activeThreadKey,
+    activeThreadRef,
+    activeThreadKnownSessionsRaw,
+  ]);
+
   const activeEnvironmentServerBrowser = useEnvironmentSupportsServerBrowser(
     activeThreadRef?.environmentId ?? null,
   );
@@ -5378,6 +5397,10 @@ export default function ChatView(props: ChatViewProps) {
     onDiffPanelOpen?.();
   };
   const addDiffSurfaceStable = useStableCallback(addDiffSurface);
+  const addChangesSurfaceStable = useStableCallback(() => {
+    if (!activeThreadRef || !isServerThread || !isGitRepo) return;
+    useRightPanelStore.getState().open(activeThreadRef, "changes");
+  });
   const openChangesFromThreadPanel = () => {
     addDiffSurface();
   };
@@ -10874,6 +10897,14 @@ export default function ChatView(props: ChatViewProps) {
           workspaceMutationId={workspaceMutationId}
         />
       </Suspense>
+    ) : renderedRightPanelSurface?.kind === "changes" ? (
+      <Suspense fallback={null}>
+        <ChangesPanel
+          key={activeThreadKey}
+          mode="embedded"
+          workspaceMutationId={workspaceMutationId}
+        />
+      </Suspense>
     ) : renderedRightPanelSurface?.kind === "pull-request" && !pullRequestsCapabilityKnown ? (
       <PullRequestDetailGhost />
     ) : renderedRightPanelSurface?.kind === "pull-request" && !supportsPullRequests ? (
@@ -11846,6 +11877,7 @@ export default function ChatView(props: ChatViewProps) {
           onAddBrowserInProfile={createBrowserSurfaceStable}
           onAddTerminal={addTerminalSurfaceStable}
           onAddDiff={addDiffSurfaceStable}
+          onAddChanges={addChangesSurfaceStable}
           onAddFiles={addFilesSurfaceStable}
           onAddPullRequest={addPullRequestSurfaceStable}
           onAddPullRequests={addPullRequestsSurfaceStable}
@@ -11853,6 +11885,7 @@ export default function ChatView(props: ChatViewProps) {
           browserAvailable={canOperatePreview && browserAvailable}
           terminalAvailable={activeProject !== null && canOperateTerminal}
           diffAvailable={isServerThread && isGitRepo}
+          changesAvailable={isServerThread && isGitRepo}
           filesAvailable={activeProject !== null}
           pullRequestAvailable={pullRequestSurfaceAvailable}
           pullRequestsAvailable={pullRequestsSurfaceAvailable}
@@ -11905,6 +11938,7 @@ export default function ChatView(props: ChatViewProps) {
             onAddBrowserInProfile={createBrowserSurfaceStable}
             onAddTerminal={addTerminalSurfaceStable}
             onAddDiff={addDiffSurfaceStable}
+            onAddChanges={addChangesSurfaceStable}
             onAddFiles={addFilesSurfaceStable}
             onAddPullRequest={addPullRequestSurfaceStable}
             onAddPullRequests={addPullRequestsSurfaceStable}
@@ -11912,6 +11946,7 @@ export default function ChatView(props: ChatViewProps) {
             browserAvailable={canOperatePreview && browserAvailable}
             terminalAvailable={activeProject !== null && canOperateTerminal}
             diffAvailable={isServerThread && isGitRepo}
+            changesAvailable={isServerThread && isGitRepo}
             filesAvailable={activeProject !== null}
             pullRequestAvailable={pullRequestSurfaceAvailable}
             pullRequestsAvailable={pullRequestsSurfaceAvailable}

@@ -220,6 +220,7 @@ import {
   shouldNavigateAfterThreadPark,
   shouldRecedeSidebarThread,
   resolveWorkingStartedAt,
+  sidebarItemBelongsToHistory,
   sidebarListItemId,
   sidebarMarkerId,
   sidebarThreadKeyAtY,
@@ -258,6 +259,7 @@ import {
 } from "./ThreadStatusIndicators";
 import { resolveSnoozePresets, snoozeWakeLabel, type SnoozePreset } from "./Sidebar.snooze";
 import { ProjectFavicon, type ProjectFaviconProject } from "./ProjectFavicon";
+import { SidebarUsageLimitsPreview } from "./sidebar/SidebarUsageLimitsPreview";
 import { ThreadSearchMatchExcerpt } from "./ThreadSearchMatch";
 import { makeWorkspaceFileDropHandlers } from "./chat/workspaceFileDrop";
 import { ProviderInstanceIcon } from "./chat/ProviderInstanceIcon";
@@ -2437,6 +2439,7 @@ export default function Sidebar() {
   const confirmThreadArchive = useClientSettings((s) => s.confirmThreadArchive);
   const timestampFormat = useClientSettings((s) => s.timestampFormat);
   const workingShelfEnabled = useClientSettings((s) => s.sidebarWorkingShelfEnabled);
+  const sidebarActiveThreadsAtBottom = useClientSettings((s) => s.sidebarActiveThreadsAtBottom);
   const projectGroupingSettings = useClientSettings(selectProjectGroupingSettings);
   const {
     settleThread,
@@ -3865,6 +3868,12 @@ export default function Sidebar() {
     visibleWorkingThreads,
     workingThreads.length,
   ]);
+  const orderedSortableItems = useMemo(() => {
+    if (!sidebarActiveThreadsAtBottom) return sidebarListItems;
+    const historyItems = sidebarListItems.filter(sidebarItemBelongsToHistory);
+    const workItems = sidebarListItems.filter((item) => !sidebarItemBelongsToHistory(item));
+    return [...historyItems, ...workItems];
+  }, [sidebarActiveThreadsAtBottom, sidebarListItems]);
   useEffect(() => {
     if (
       dragState !== null &&
@@ -3913,7 +3922,10 @@ export default function Sidebar() {
     },
     [sidebarListItems],
   );
-  const sortableIds = useMemo(() => sidebarListItems.map(sidebarListItemId), [sidebarListItems]);
+  const sortableIds = useMemo(
+    () => orderedSortableItems.map(sidebarListItemId),
+    [orderedSortableItems],
+  );
   const draggedSettledOrder = useMemo(() => {
     const thread = dragState === null ? undefined : threadByKey.get(dragState.activeKey);
     if (dragState === null || thread === undefined) return [];
@@ -3942,7 +3954,9 @@ export default function Sidebar() {
   const sidebarSortingStrategy = useMemo(
     () =>
       createSidebarSortingStrategy({
-        items: sidebarListItems,
+        items: orderedSortableItems,
+        dropItems: sidebarListItems,
+        inverted: sidebarActiveThreadsAtBottom,
         enabled: !isContextDrag,
         boundaryLabelHeight: SIDEBAR_DRAG_LABEL_HEIGHT,
         settledOrder: draggedSettledOrder,
@@ -3956,10 +3970,12 @@ export default function Sidebar() {
       draggedActiveOrder,
       draggedSettledOrder,
       isContextDrag,
+      orderedSortableItems,
       routeThreadKey,
       settledShelfExpanded,
       settledVisibleCount,
       sidebarListItems,
+      sidebarActiveThreadsAtBottom,
       snoozedThreads.length,
     ],
   );
@@ -4015,8 +4031,10 @@ export default function Sidebar() {
         );
       },
       {
-        items: sidebarListItems,
+        items: orderedSortableItems,
+        dropItems: sidebarListItems,
         activationY: dragActivationY ?? null,
+        inverted: sidebarActiveThreadsAtBottom,
       },
     );
   }, [
@@ -4031,6 +4049,8 @@ export default function Sidebar() {
     draggableThreadKeys,
     pinnedKeys,
     sidebarListItems,
+    orderedSortableItems,
+    sidebarActiveThreadsAtBottom,
     threadByKey,
     workingShelfEnabled,
   ]);
@@ -5228,7 +5248,7 @@ export default function Sidebar() {
                 collisionDetection={dndCollisionDetection}
                 modifiers={[
                   restrictToVerticalAxis,
-                  restrictBelowPins,
+                  ...(sidebarActiveThreadsAtBottom ? [] : [restrictBelowPins]),
                   restrictToFirstScrollableAncestor,
                 ]}
                 onDragStart={handleThreadDragStart}
@@ -5398,7 +5418,7 @@ export default function Sidebar() {
                         );
                       };
                       const from = isContextDrag ? null : (dragState?.activeSection ?? null);
-                      const items: ReactNode[] = [
+                      const draftNode = (
                         <SidebarDraftBlock
                           key="draft-sessions"
                           projectByKey={projectByKey}
@@ -5407,16 +5427,20 @@ export default function Sidebar() {
                           routeDraftId={routeDraftIdForRows}
                           onNavigateToDraft={navigateToDraft}
                           onDraftContextMenu={handleDraftContextMenu}
-                        />,
-                      ];
+                        />
+                      );
+                      const workNodes: ReactNode[] = [];
+                      const historyNodes: ReactNode[] = [];
                       for (const item of sidebarListItems) {
                         if (item.kind === "thread") {
-                          items.push(renderThreadRow(threadByKey.get(item.key)!, item.section));
+                          const node = renderThreadRow(threadByKey.get(item.key)!, item.section);
+                          (sidebarItemBelongsToHistory(item) ? historyNodes : workNodes).push(node);
                           continue;
                         }
+                        const target = sidebarItemBelongsToHistory(item) ? historyNodes : workNodes;
                         switch (item.marker) {
                           case "pinned-header":
-                            items.push(
+                            target.push(
                               <SidebarDragBoundary
                                 key="pinned-header"
                                 marker="pinned-header"
@@ -5427,7 +5451,7 @@ export default function Sidebar() {
                             );
                             break;
                           case "pinned-divider":
-                            items.push(
+                            target.push(
                               <SidebarDragBoundary
                                 key="pinned-divider"
                                 marker="pinned-divider"
@@ -5438,7 +5462,7 @@ export default function Sidebar() {
                             );
                             break;
                           case "active-placeholder":
-                            items.push(
+                            target.push(
                               <SidebarSectionPlaceholder
                                 key="active-placeholder"
                                 marker="active-placeholder"
@@ -5456,11 +5480,10 @@ export default function Sidebar() {
                             );
                             break;
                           case "working-header":
-                            items.push(
+                            target.push(
                               <SidebarSectionHeader
                                 key="working-shelf-header"
                                 marker="working-header"
-                                className="mt-auto"
                                 label={
                                   workingShelfExpanded
                                     ? "Working"
@@ -5474,11 +5497,10 @@ export default function Sidebar() {
                             );
                             break;
                           case "snoozed-header":
-                            items.push(
+                            target.push(
                               <SidebarSectionHeader
                                 key="snoozed-shelf-header"
                                 marker="snoozed-header"
-                                className={cn(workingThreads.length === 0 && "mt-auto")}
                                 label={
                                   snoozedShelfExpanded
                                     ? "Snoozed"
@@ -5492,13 +5514,10 @@ export default function Sidebar() {
                             );
                             break;
                           case "settled-header":
-                            items.push(
+                            target.push(
                               <SidebarSectionHeader
                                 key="settled-shelf-header"
                                 marker="settled-header"
-                                className={cn(
-                                  workingThreads.length + snoozedThreads.length === 0 && "mt-auto",
-                                )}
                                 label={
                                   settledShelfExpanded
                                     ? "Settled"
@@ -5514,7 +5533,7 @@ export default function Sidebar() {
                             );
                             break;
                           case "settled-placeholder":
-                            items.push(
+                            target.push(
                               <SidebarSectionPlaceholder
                                 key="settled-placeholder"
                                 marker="settled-placeholder"
@@ -5533,20 +5552,28 @@ export default function Sidebar() {
                             break;
                         }
                       }
-                      return items;
+                      if (settledShelfExpanded && hiddenSettledCount > 0) {
+                        historyNodes.push(
+                          <li key="settled-show-more" className="list-none">
+                            <button
+                              type="button"
+                              onClick={showMoreSettled}
+                              className="flex h-9 w-full cursor-pointer items-center gap-2.5 rounded-md px-2.5 text-left text-sm text-sidebar-muted-foreground/55 hover:bg-sidebar-row-hover hover:text-sidebar-foreground"
+                            >
+                              <PlusIcon aria-hidden className="size-4 shrink-0" />
+                              Show {Math.min(hiddenSettledCount, SETTLED_TAIL_PAGE_COUNT)} more
+                            </button>
+                          </li>,
+                        );
+                      }
+                      const limitsNode = <SidebarUsageLimitsPreview key="usage-limits-preview" />;
+                      const spacer = (
+                        <li key="sidebar-bottom-anchor" aria-hidden className="mt-auto list-none" />
+                      );
+                      return sidebarActiveThreadsAtBottom
+                        ? [...historyNodes, limitsNode, spacer, draftNode, ...workNodes]
+                        : [draftNode, ...workNodes, spacer, ...historyNodes, limitsNode];
                     })()}
-                    {settledShelfExpanded && hiddenSettledCount > 0 ? (
-                      <li className="list-none">
-                        <button
-                          type="button"
-                          onClick={showMoreSettled}
-                          className="flex h-9 w-full cursor-pointer items-center gap-2.5 rounded-md px-2.5 text-left text-sm text-sidebar-muted-foreground/55 hover:bg-sidebar-row-hover hover:text-sidebar-foreground"
-                        >
-                          <PlusIcon aria-hidden className="size-4 shrink-0" />
-                          Show {Math.min(hiddenSettledCount, SETTLED_TAIL_PAGE_COUNT)} more
-                        </button>
-                      </li>
-                    ) : null}
                   </ul>
                 </SortableContext>
               </DndContext>

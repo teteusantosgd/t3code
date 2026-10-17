@@ -395,6 +395,12 @@ export const ClientSettingsSchema = Schema.Struct({
     Schema.withDecodingDefault(Effect.succeed([])),
   ),
   diffFilesCollapsed: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
+  showProviderInstanceBadges: Schema.Boolean.pipe(
+    Schema.withDecodingDefault(Effect.succeed(false)),
+  ),
+  sidebarActiveThreadsAtBottom: Schema.Boolean.pipe(
+    Schema.withDecodingDefault(Effect.succeed(false)),
+  ),
   diffIgnoreWhitespace: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
   diffLayout: DiffLayout.pipe(Schema.withDecodingDefault(Effect.succeed(DEFAULT_DIFF_LAYOUT))),
   environmentIdentificationMode: EnvironmentIdentificationMode.pipe(
@@ -984,6 +990,7 @@ export const PROJECT_SCOPED_SERVER_SETTING_KEYS = [
   "defaultProjectScripts",
   "enableAgentBrowserAccess",
   "enableAgentDeviceAccess",
+  "enableAgentTerminalAccess",
   "textGenerationModelSelection",
   "sourceControlWriterModelSelection",
   "reviewGuideModelSelection",
@@ -1032,6 +1039,7 @@ export const ProjectSettingsOverrides = Schema.Struct({
   defaultProjectScripts: Schema.optionalKey(Schema.Array(ProjectScript)),
   enableAgentBrowserAccess: Schema.optionalKey(Schema.Boolean),
   enableAgentDeviceAccess: Schema.optionalKey(Schema.Boolean),
+  enableAgentTerminalAccess: Schema.optionalKey(Schema.Boolean),
   textGenerationModelSelection: Schema.optionalKey(ModelSelection),
   sourceControlWriterModelSelection: Schema.optionalKey(Schema.NullOr(ModelSelection)),
   reviewGuideModelSelection: Schema.optionalKey(Schema.NullOr(ModelSelection)),
@@ -1201,6 +1209,8 @@ export const ServerSettings = Schema.Struct({
    * unaffected.
    */
   enableAgentDeviceAccess: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
+  // Shared PTYs bypass provider sandboxes; the session also requires full access.
+  enableAgentTerminalAccess: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
   /**
    * Whether this server may install and run T3's device helper processes.
    * Kept separate from agent access so enabling the user's Device panel does
@@ -1590,6 +1600,7 @@ export const ServerSettingsPatch = Schema.Struct({
     Schema.Record(ProjectId, Schema.NullOr(ProjectSettingsOverrides)),
   ),
   enableAgentDeviceAccess: Schema.optionalKey(Schema.Boolean),
+  enableAgentTerminalAccess: Schema.optionalKey(Schema.Boolean),
   enableDeviceSupport: Schema.optionalKey(Schema.Boolean),
   deviceOnboardingCompleted: Schema.optionalKey(Schema.Boolean),
   deviceHosts: Schema.optionalKey(SshDeviceHostConfigs),
@@ -1728,6 +1739,8 @@ export const ClientSettingsPatch = Schema.Struct({
   confirmThreadDelete: Schema.optionalKey(Schema.Boolean),
   confirmThreadUnpin: Schema.optionalKey(Schema.Boolean),
   diffFilesCollapsed: Schema.optionalKey(Schema.Boolean),
+  showProviderInstanceBadges: Schema.optionalKey(Schema.Boolean),
+  sidebarActiveThreadsAtBottom: Schema.optionalKey(Schema.Boolean),
   diffIgnoreWhitespace: Schema.optionalKey(Schema.Boolean),
   diffLayout: Schema.optionalKey(DiffLayout),
   environmentIdentificationMode: Schema.optionalKey(EnvironmentIdentificationMode),

@@ -564,6 +564,14 @@ export function useSettingsRestore(onRestored?: () => void) {
       ...(settings.inAppNotificationsEnabled !== DEFAULT_UNIFIED_SETTINGS.inAppNotificationsEnabled
         ? ["In-app notifications"]
         : []),
+      ...(settings.sidebarActiveThreadsAtBottom !==
+      DEFAULT_UNIFIED_SETTINGS.sidebarActiveThreadsAtBottom
+        ? ["Active threads at bottom"]
+        : []),
+      ...(settings.showProviderInstanceBadges !==
+      DEFAULT_UNIFIED_SETTINGS.showProviderInstanceBadges
+        ? ["Provider instance badges"]
+        : []),
       ...(settings.sidebarThreadPreviewCount !== DEFAULT_UNIFIED_SETTINGS.sidebarThreadPreviewCount
         ? ["Visible threads"]
         : []),
@@ -721,6 +729,8 @@ export function useSettingsRestore(onRestored?: () => void) {
       settings.sidebarProjectSortOrder,
       settings.sidebarWorkingShelfEnabled,
       settings.sidebarThreadPreviewCount,
+      settings.sidebarActiveThreadsAtBottom,
+      settings.showProviderInstanceBadges,
       settings.showSkillsInSlashMenu,
       settings.timestampFormat,
       settings.notificationMode,
@@ -817,6 +827,9 @@ export function useSettingsRestore(onRestored?: () => void) {
       glassOpacity: DEFAULT_UNIFIED_SETTINGS.glassOpacity,
       panelAnimationDurationMs: DEFAULT_UNIFIED_SETTINGS.panelAnimationDurationMs,
       sidebarThreadPreviewCount: DEFAULT_UNIFIED_SETTINGS.sidebarThreadPreviewCount,
+      sidebarActiveThreadsAtBottom: DEFAULT_UNIFIED_SETTINGS.sidebarActiveThreadsAtBottom,
+      showProviderInstanceBadges: DEFAULT_UNIFIED_SETTINGS.showProviderInstanceBadges,
+      enableAgentTerminalAccess: DEFAULT_UNIFIED_SETTINGS.enableAgentTerminalAccess,
       sidebarProjectGroupingMode: DEFAULT_UNIFIED_SETTINGS.sidebarProjectGroupingMode,
       sidebarProjectSortOrder: DEFAULT_UNIFIED_SETTINGS.sidebarProjectSortOrder,
       sidebarWorkingShelfEnabled: DEFAULT_UNIFIED_SETTINGS.sidebarWorkingShelfEnabled,
@@ -2353,6 +2366,33 @@ export function GeneralSettingsPanel() {
                 ))}
               </SelectPopup>
             </Select>
+          }
+        />
+
+        <SettingsRow
+          {...searchableSetting("sidebar-active-threads-at-bottom")}
+          description="Keep drafts, pinned, active, and working threads near the bottom of the sidebar."
+          control={
+            <Switch
+              checked={settings.sidebarActiveThreadsAtBottom}
+              onCheckedChange={(checked) =>
+                updateSettings({ sidebarActiveThreadsAtBottom: Boolean(checked) })
+              }
+              aria-label="Active threads at bottom"
+            />
+          }
+        />
+        <SettingsRow
+          {...searchableSetting("provider-instance-badges")}
+          description="Show account initials or accents on provider icons."
+          control={
+            <Switch
+              checked={settings.showProviderInstanceBadges}
+              onCheckedChange={(checked) =>
+                updateSettings({ showProviderInstanceBadges: Boolean(checked) })
+              }
+              aria-label="Provider instance badges"
+            />
           }
         />
 

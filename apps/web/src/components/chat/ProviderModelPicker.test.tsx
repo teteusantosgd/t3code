@@ -5,7 +5,12 @@ import {
   type ServerProvider,
 } from "@t3tools/contracts";
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it } from "vite-plus/test";
+import { describe, expect, it, vi } from "vite-plus/test";
+
+const clientSettings = vi.hoisted(() => ({ showProviderInstanceBadges: false }));
+vi.mock("../../hooks/useSettings", () => ({
+  useClientSettings: <T,>(select: (settings: typeof clientSettings) => T) => select(clientSettings),
+}));
 
 import { deriveProviderInstanceEntries } from "../../providerInstances";
 import { ProviderModelPicker } from "./ProviderModelPicker";
@@ -158,21 +163,31 @@ describe("ProviderModelPicker", () => {
     expect(markup).not.toContain(">missing-model<");
   });
 
-  it("keeps instance initials visible in the resting trigger", () => {
-    const activeEntry = providerEntry("codex_personal", "codex");
-    const markup = renderToStaticMarkup(
-      <ProviderModelPicker
-        environmentId={null}
-        activeInstanceId={activeEntry.instanceId}
-        model="gpt-5"
-        lockedProvider={null}
-        instanceEntries={[providerEntry("codex", "codex"), activeEntry]}
-        modelOptionsByInstance={new Map()}
-        size="xs"
-        onInstanceModelChange={() => {}}
-      />,
-    );
+  describe("instance badge", () => {
+    const renderTrigger = () => {
+      const activeEntry = providerEntry("codex_personal", "codex");
+      return renderToStaticMarkup(
+        <ProviderModelPicker
+          environmentId={null}
+          activeInstanceId={activeEntry.instanceId}
+          model="gpt-5"
+          lockedProvider={null}
+          instanceEntries={[providerEntry("codex", "codex"), activeEntry]}
+          modelOptionsByInstance={new Map()}
+          size="xs"
+          onInstanceModelChange={() => {}}
+        />,
+      );
+    };
 
-    expect(markup).toContain(">CP</span>");
+    it("keeps instance initials visible in the resting trigger when enabled", () => {
+      clientSettings.showProviderInstanceBadges = true;
+      expect(renderTrigger()).toContain(">CP</span>");
+    });
+
+    it("hides instance initials by default", () => {
+      clientSettings.showProviderInstanceBadges = false;
+      expect(renderTrigger()).not.toContain(">CP</span>");
+    });
   });
 });

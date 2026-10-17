@@ -118,6 +118,8 @@ import {
 } from "./worktreeSetup.ts";
 import {
   GitActionProgressEvent,
+  GitGenerateCommitMessageInput,
+  GitGenerateCommitMessageResult,
   VcsSwitchRefInput,
   VcsSwitchRefResult,
   GitCommandError,
@@ -134,6 +136,18 @@ import {
   VcsPullInput,
   GitPullRequestRefInput,
   VcsPullResult,
+  VcsPushInput,
+  VcsPushResult,
+  VcsPathsInput,
+  VcsHunkInput,
+  VcsStashInput,
+  VcsStashResult,
+  VcsAmendCommitInput,
+  VcsAmendCommitResult,
+  VcsUndoLastCommitInput,
+  VcsUndoLastCommitResult,
+  VcsSyncInput,
+  VcsSyncResult,
   VcsRemoveWorktreeInput,
   GitResolvePullRequestResult,
   GitRunStackedActionInput,
@@ -422,7 +436,14 @@ export const WS_METHODS = {
 
   // VCS methods
   vcsPull: "vcs.pull",
+  vcsPush: "vcs.push",
+  vcsSync: "vcs.sync",
   vcsRefreshStatus: "vcs.refreshStatus",
+  vcsPaths: "vcs.paths",
+  vcsHunk: "vcs.hunk",
+  vcsStash: "vcs.stash",
+  vcsAmendCommit: "vcs.amendCommit",
+  vcsUndoLastCommit: "vcs.undoLastCommit",
   vcsListRefs: "vcs.listRefs",
   vcsCreateWorktree: "vcs.createWorktree",
   vcsRemoveWorktree: "vcs.removeWorktree",
@@ -432,6 +453,7 @@ export const WS_METHODS = {
 
   // Git workflow methods
   gitRunStackedAction: "git.runStackedAction",
+  gitGenerateCommitMessage: "git.generateCommitMessage",
   gitResolvePullRequest: "git.resolvePullRequest",
   gitPreparePullRequestThread: "git.preparePullRequestThread",
 
@@ -1358,10 +1380,50 @@ const WsVcsPullRpc = Rpc.make(WS_METHODS.vcsPull, {
   error: Schema.Union([GitCommandError, EnvironmentAuthorizationError]),
 });
 
+const WsVcsPushRpc = Rpc.make(WS_METHODS.vcsPush, {
+  payload: VcsPushInput,
+  success: VcsPushResult,
+  error: Schema.Union([GitCommandError, EnvironmentAuthorizationError]),
+});
+
+const WsVcsSyncRpc = Rpc.make(WS_METHODS.vcsSync, {
+  payload: VcsSyncInput,
+  success: VcsSyncResult,
+  error: Schema.Union([GitCommandError, EnvironmentAuthorizationError]),
+});
+
 const WsVcsRefreshStatusRpc = Rpc.make(WS_METHODS.vcsRefreshStatus, {
   payload: VcsStatusInput,
   success: VcsStatusResult,
   error: Schema.Union([GitManagerServiceError, EnvironmentAuthorizationError]),
+});
+
+const WsVcsPathsRpc = Rpc.make(WS_METHODS.vcsPaths, {
+  payload: VcsPathsInput,
+  error: Schema.Union([GitCommandError, EnvironmentAuthorizationError]),
+});
+
+const WsVcsHunkRpc = Rpc.make(WS_METHODS.vcsHunk, {
+  payload: VcsHunkInput,
+  error: Schema.Union([GitCommandError, EnvironmentAuthorizationError]),
+});
+
+const WsVcsStashRpc = Rpc.make(WS_METHODS.vcsStash, {
+  payload: VcsStashInput,
+  success: VcsStashResult,
+  error: Schema.Union([GitCommandError, EnvironmentAuthorizationError]),
+});
+
+const WsVcsAmendCommitRpc = Rpc.make(WS_METHODS.vcsAmendCommit, {
+  payload: VcsAmendCommitInput,
+  success: VcsAmendCommitResult,
+  error: Schema.Union([GitCommandError, EnvironmentAuthorizationError]),
+});
+
+const WsVcsUndoLastCommitRpc = Rpc.make(WS_METHODS.vcsUndoLastCommit, {
+  payload: VcsUndoLastCommitInput,
+  success: VcsUndoLastCommitResult,
+  error: Schema.Union([GitCommandError, EnvironmentAuthorizationError]),
 });
 
 const WsSubscribeWorktreeSetupRpc = Rpc.make(WS_METHODS.subscribeWorktreeSetup, {
@@ -1375,6 +1437,12 @@ const WsWorktreeSetupCancelRpc = Rpc.make(WS_METHODS.worktreeSetupCancel, {
   payload: WorktreeSetupCancelInput,
   success: WorktreeSetupCancelResult,
   error: EnvironmentAuthorizationError,
+});
+
+const WsGitGenerateCommitMessageRpc = Rpc.make(WS_METHODS.gitGenerateCommitMessage, {
+  payload: GitGenerateCommitMessageInput,
+  success: GitGenerateCommitMessageResult,
+  error: Schema.Union([GitManagerServiceError, EnvironmentAuthorizationError]),
 });
 
 const WsGitRunStackedActionRpc = Rpc.make(WS_METHODS.gitRunStackedAction, {
@@ -2006,8 +2074,16 @@ export const WsRpcGroup = RpcGroup.make(
   WsSubscribeWorktreeSetupRpc,
   WsWorktreeSetupCancelRpc,
   WsVcsPullRpc,
+  WsVcsPushRpc,
+  WsVcsSyncRpc,
   WsVcsRefreshStatusRpc,
+  WsVcsPathsRpc,
+  WsVcsHunkRpc,
+  WsVcsStashRpc,
+  WsVcsAmendCommitRpc,
+  WsVcsUndoLastCommitRpc,
   WsGitRunStackedActionRpc,
+  WsGitGenerateCommitMessageRpc,
   WsGitResolvePullRequestRpc,
   WsGitPreparePullRequestThreadRpc,
   WsVcsListRefsRpc,

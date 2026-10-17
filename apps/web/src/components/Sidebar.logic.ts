@@ -174,6 +174,16 @@ export function sidebarListItemId(item: SidebarListItem): string {
   return item.kind === "thread" ? item.key : sidebarMarkerId(item.marker);
 }
 
+/** Whether an item belongs to the snoozed/settled history block. */
+export function sidebarItemBelongsToHistory(item: SidebarListItem): boolean {
+  if (item.kind === "thread") return item.section === "snoozed" || item.section === "settled";
+  return (
+    item.marker === "snoozed-header" ||
+    item.marker === "settled-header" ||
+    item.marker === "settled-placeholder"
+  );
+}
+
 /** The section a slot belongs to, read off the markers around it: from
     the top down, everything before the pinned divider is pinned, then the
     inbox until the first shelf header, each shelf until the next header,

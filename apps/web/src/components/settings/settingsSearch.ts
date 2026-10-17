@@ -699,6 +699,25 @@ export const SETTINGS_SEARCH_ITEMS = [
     searchTerms: ["allow disable enable open drive preview tools sessions project override"],
   },
   {
+    id: "sidebar-active-threads-at-bottom",
+    title: "Active threads at bottom",
+    to: "/settings/appearance",
+    searchTerms: ["sidebar working pinned drafts composer order"],
+  },
+  {
+    id: "provider-instance-badges",
+    title: "Provider instance badges",
+    to: "/settings/appearance",
+    searchTerms: ["model icons account initials accent"],
+  },
+  {
+    id: "agent-terminal-access",
+    title: "Agent terminal access",
+    to: "/settings/integrations",
+    scope: "project-defaults",
+    searchTerms: ["allow disable enable open drive terminal tools sessions project override"],
+  },
+  {
     id: "device-hosts",
     title: "Device hosts",
     to: "/settings/integrations",

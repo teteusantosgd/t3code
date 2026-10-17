@@ -1672,7 +1672,7 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
         assert.isFalse(
           commands.some((command) => command.options.env?.ELECTRON_RUN_AS_NODE === "1"),
         );
-        assert.isTrue(
+        assert.isFalse(
           commands.some(
             (command) =>
               command.command === process.execPath && command.options.env?.NODE_PATH === "",
@@ -1689,6 +1689,56 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
       ),
     );
   });
+
+  it.effect(
+    "skips Windows probes on a cross-build Darwin host while validating the payload",
+    () => {
+      const commands: Array<{
+        readonly command: string;
+        readonly options: {
+          readonly env?: Readonly<Record<string, string | undefined>>;
+        };
+      }> = [];
+      const spawnerLayer = Layer.succeed(
+        ChildProcessSpawner.ChildProcessSpawner,
+        ChildProcessSpawner.make((command) => {
+          commands.push(command as unknown as (typeof commands)[number]);
+          return Effect.succeed(mockProcess(0));
+        }),
+      );
+
+      return Effect.scoped(
+        Effect.gen(function* () {
+          const fixture = yield* makeWindowsPayloadFixture({ copyUnpackedNatives: true });
+          const result = yield* validateWindowsPackagedPayload({
+            stageDistDir: fixture.stageDistDir,
+            appExecutableName: fixture.appExecutableName,
+            targetArch: "x64",
+            appVersion: WINDOWS_PAYLOAD_FIXTURE_VERSION,
+          });
+
+          assert.isNotEmpty(result.unpackedFiles);
+          assert.isFalse(
+            commands.some((command) => command.options.env?.ELECTRON_RUN_AS_NODE === "1"),
+          );
+          assert.isFalse(
+            commands.some(
+              (command) =>
+                command.command === process.execPath && command.options.env?.NODE_PATH === "",
+            ),
+          );
+        }),
+      ).pipe(
+        Effect.provide(
+          Layer.mergeAll(
+            spawnerLayer,
+            Layer.succeed(HostProcess.Platform, "darwin"),
+            Layer.succeed(HostProcess.Architecture, "arm64"),
+          ),
+        ),
+      );
+    },
+  );
 
   it.effect("rejects a cross-architecture Windows payload without its primary executable", () =>
     Effect.scoped(
@@ -1808,23 +1858,48 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
   );
 
   it.effect("rejects a sidecar whose extracted server bundle cannot resolve", () =>
-    Effect.scoped(
-      Effect.gen(function* () {
-        const fixture = yield* makeWindowsPayloadFixture({
-          copyUnpackedNatives: true,
-          serverEntrySource: 'import "t3code-deliberately-missing-package";\n',
-        });
-        const error = yield* validateWindowsPackagedPayload({
-          stageDistDir: fixture.stageDistDir,
-          appExecutableName: fixture.appExecutableName,
-          targetArch: "x64",
-          appVersion: WINDOWS_PAYLOAD_FIXTURE_VERSION,
-        }).pipe(Effect.flip);
+    (() => {
+      const spawnerLayer = Layer.succeed(
+        ChildProcessSpawner.ChildProcessSpawner,
+        ChildProcessSpawner.make((command) => {
+          const childProcess = command as unknown as { readonly command: string };
+          return Effect.succeed(
+            mockProcess(
+              childProcess.command === process.execPath ? 1 : 0,
+              childProcess.command === process.execPath
+                ? "Cannot find package 't3code-deliberately-missing-package' imported from bin.mjs"
+                : "",
+            ),
+          );
+        }),
+      );
 
-        assert.instanceOf(error, BundleNotSelfContainedError);
-        assert.include(error.output, "t3code-deliberately-missing-package");
-      }),
-    ).pipe(Effect.provideService(HostProcess.Platform, "linux")),
+      return Effect.scoped(
+        Effect.gen(function* () {
+          const fixture = yield* makeWindowsPayloadFixture({
+            copyUnpackedNatives: true,
+            serverEntrySource: 'import "t3code-deliberately-missing-package";\n',
+          });
+          const error = yield* validateWindowsPackagedPayload({
+            stageDistDir: fixture.stageDistDir,
+            appExecutableName: fixture.appExecutableName,
+            targetArch: "x64",
+            appVersion: WINDOWS_PAYLOAD_FIXTURE_VERSION,
+          }).pipe(Effect.flip);
+
+          assert.instanceOf(error, BundleNotSelfContainedError);
+          assert.include(error.output, "t3code-deliberately-missing-package");
+        }),
+      ).pipe(
+        Effect.provide(
+          Layer.mergeAll(
+            spawnerLayer,
+            Layer.succeed(HostProcess.Platform, "win32"),
+            Layer.succeed(HostProcess.Architecture, "x64"),
+          ),
+        ),
+      );
+    })(),
   );
 
   it.effect("preserves both Linux icon resize failures with structural context", () => {

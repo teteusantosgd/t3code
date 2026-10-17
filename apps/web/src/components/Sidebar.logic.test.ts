@@ -48,6 +48,7 @@ import {
   sortLogicalProjectsForSidebar,
   sortInboxThreadsByReturn,
   resolveSidebarDropTarget,
+  sidebarItemBelongsToHistory,
   planSidebarThreadDrop,
   sortPinnedThreadsForSidebar,
   sortProjectsForSidebar,
@@ -72,6 +73,29 @@ import {
   type Thread,
 } from "../types";
 import { makeThreadFixture, type ThreadFixtureOverrides } from "../test-fixtures";
+
+describe("sidebarItemBelongsToHistory", () => {
+  const thread = (section: SidebarSection): SidebarListItem => ({
+    kind: "thread",
+    key: `thread-${section}`,
+    section,
+  });
+  const marker = (markerName: SidebarListMarker): SidebarListItem => ({
+    kind: "marker",
+    marker: markerName,
+  });
+
+  it("keeps Working in the work block and only snoozed/settled in history", () => {
+    expect(sidebarItemBelongsToHistory(thread("pinned"))).toBe(false);
+    expect(sidebarItemBelongsToHistory(thread("active"))).toBe(false);
+    expect(sidebarItemBelongsToHistory(thread("working"))).toBe(false);
+    expect(sidebarItemBelongsToHistory(thread("snoozed"))).toBe(true);
+    expect(sidebarItemBelongsToHistory(thread("settled"))).toBe(true);
+    expect(sidebarItemBelongsToHistory(marker("working-header"))).toBe(false);
+    expect(sidebarItemBelongsToHistory(marker("snoozed-header"))).toBe(true);
+    expect(sidebarItemBelongsToHistory(marker("settled-header"))).toBe(true);
+  });
+});
 
 const localEnvironmentId = EnvironmentId.make("environment-local");
 

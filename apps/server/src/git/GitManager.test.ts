@@ -696,6 +696,7 @@ function runStackedAction(
     commitMessage?: string;
     featureBranch?: boolean;
     filePaths?: readonly string[];
+    commitScope?: "staged" | "all";
   },
   options?: Parameters<GitManager.GitManager["Service"]["runStackedAction"]>[1],
 ) {
@@ -3596,6 +3597,50 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
         ),
       ).toBe("Implement stacked git actions");
     }),
+  );
+
+  it.effect.each([false, true] as const)(
+    "staged scope commits the index only and sends only the staged patch (featureBranch=%s)",
+    (featureBranch) =>
+      Effect.gen(function* () {
+        const repoDir = yield* makeTempDir("t3code-git-manager-");
+        yield* initRepo(repoDir);
+        const readme = NodePath.join(repoDir, "README.md");
+        NodeFS.writeFileSync(readme, "hello\nindex-line\n");
+        yield* runGit(repoDir, ["add", "README.md"]);
+        NodeFS.writeFileSync(readme, "hello\nindex-line\nworktree-line\n");
+        const patches: string[] = [];
+
+        const { manager } = yield* makeManager({
+          textGeneration: {
+            generateCommitMessage: (input) =>
+              Effect.sync(() => {
+                patches.push(input.stagedPatch);
+                return {
+                  subject: "Commit the index",
+                  body: "",
+                  ...(input.includeBranch ? { branch: "feature/commit-the-index" } : {}),
+                };
+              }),
+          },
+        });
+        const result = yield* runStackedAction(manager, {
+          cwd: repoDir,
+          action: "commit",
+          commitScope: "staged",
+          ...(featureBranch ? { featureBranch: true } : {}),
+        });
+
+        expect(result.commit.status).toBe("created");
+        expect(patches.length).toBeGreaterThan(0);
+        for (const patch of patches) {
+          expect(patch).toContain("+index-line");
+          expect(patch).not.toContain("worktree-line");
+        }
+        const committed = yield* runGit(repoDir, ["show", "HEAD:README.md"]);
+        expect(committed.stdout).toBe("hello\nindex-line\n");
+        expect(NodeFS.readFileSync(readme, "utf8")).toBe("hello\nindex-line\nworktree-line\n");
+      }),
   );
 
   it.effect("preserves custom style when instructions are empty", () =>

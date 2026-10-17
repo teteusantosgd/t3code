@@ -3522,10 +3522,18 @@ export const validateWindowsPackagedPayload = Effect.fn(
     verbose: input.verbose ?? false,
   });
 
-  yield* verifyPackagedBundleIsSelfContained({
-    asarPath,
-    verbose: input.verbose ?? false,
-  });
+  const hostPlatform = yield* HostProcess.Platform;
+  const hostArchitecture = yield* HostProcess.Architecture;
+  if (hostPlatform === "win32" && hostArchitecture === input.targetArch) {
+    yield* verifyPackagedBundleIsSelfContained({
+      asarPath,
+      verbose: input.verbose ?? false,
+    });
+  } else {
+    yield* Effect.log(
+      `[desktop-artifact] Skipping sidecar Node self-check on ${hostPlatform}/${hostArchitecture} for ${input.targetArch} (win32 natives only load on matching Windows hosts).`,
+    );
+  }
 
   yield* Effect.log(
     `[desktop-artifact] Validated Windows payload (${String(fileCount)} files, ${String(unpackedFiles.length)} sidecar natives).`,

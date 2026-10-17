@@ -301,9 +301,61 @@ export function createVcsEnvironmentAtoms<R, E>(
       concurrency: vcsCommandConcurrency,
       onSettled: invalidateRefs,
     }),
+    push: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:vcs:push",
+      tag: WS_METHODS.vcsPush,
+      scheduler: vcsCommandScheduler,
+      concurrency: vcsCommandConcurrency,
+      onSettled: invalidateRefs,
+    }),
+    sync: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:vcs:sync",
+      tag: WS_METHODS.vcsSync,
+      scheduler: vcsCommandScheduler,
+      concurrency: vcsCommandConcurrency,
+      onSettled: invalidateRefs,
+    }),
     refreshStatus: createEnvironmentRpcCommand(runtime, {
       label: "environment-data:vcs:refresh-status",
       tag: WS_METHODS.vcsRefreshStatus,
+      scheduler: vcsCommandScheduler,
+      concurrency: vcsCommandConcurrency,
+      onSettled: invalidateRefs,
+    }),
+    // Source Control mutations. They share the per-checkout serial lane with
+    // the rest of the VCS commands, so a burst of stage/unstage clicks cannot
+    // interleave two index writes in the same repository.
+    paths: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:vcs:paths",
+      tag: WS_METHODS.vcsPaths,
+      scheduler: vcsCommandScheduler,
+      concurrency: vcsCommandConcurrency,
+      onSettled: invalidateRefs,
+    }),
+    hunk: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:vcs:hunk",
+      tag: WS_METHODS.vcsHunk,
+      scheduler: vcsCommandScheduler,
+      concurrency: vcsCommandConcurrency,
+      onSettled: invalidateRefs,
+    }),
+    stash: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:vcs:stash",
+      tag: WS_METHODS.vcsStash,
+      scheduler: vcsCommandScheduler,
+      concurrency: vcsCommandConcurrency,
+      onSettled: invalidateRefs,
+    }),
+    amendCommit: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:vcs:amend-commit",
+      tag: WS_METHODS.vcsAmendCommit,
+      scheduler: vcsCommandScheduler,
+      concurrency: vcsCommandConcurrency,
+      onSettled: invalidateRefs,
+    }),
+    undoLastCommit: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:vcs:undo-last-commit",
+      tag: WS_METHODS.vcsUndoLastCommit,
       scheduler: vcsCommandScheduler,
       concurrency: vcsCommandConcurrency,
       onSettled: invalidateRefs,

@@ -236,6 +236,35 @@ export function buildBooleanOptionDescriptor(input: {
   };
 }
 
+const XHIGH_LABEL_PATTERN = /\b(?:extra[ -]?high|xhigh)\b/i;
+
+function withXHighEffortLabels(
+  models: ReadonlyArray<ServerProviderModel>,
+): ReadonlyArray<ServerProviderModel> {
+  return models.map((model) => {
+    const descriptors = model.capabilities?.optionDescriptors;
+    if (!descriptors) return model;
+    return {
+      ...model,
+      capabilities: {
+        ...model.capabilities,
+        optionDescriptors: descriptors.map((descriptor) =>
+          descriptor.type === "select"
+            ? {
+                ...descriptor,
+                options: descriptor.options.map((option) =>
+                  option.id === "xhigh"
+                    ? { ...option, label: option.label.replace(XHIGH_LABEL_PATTERN, "XHigh") }
+                    : option,
+                ),
+              }
+            : descriptor,
+        ),
+      },
+    };
+  });
+}
+
 export function buildServerProvider(input: {
   driver?: ProviderDriverKind;
   presentation: ServerProviderPresentation;
@@ -279,7 +308,7 @@ export function buildServerProvider(input: {
     auth: input.probe.auth,
     checkedAt: input.checkedAt,
     ...(input.probe.message ? { message: input.probe.message } : {}),
-    models: input.models,
+    models: withXHighEffortLabels(input.models),
     ...(input.updateRequiredModels?.length
       ? { updateRequiredModels: input.updateRequiredModels }
       : {}),

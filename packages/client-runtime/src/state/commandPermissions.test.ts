@@ -309,3 +309,68 @@ it.effect("rejects protected unary and streamed RPCs outside a guarded command",
     expect(writes).toBe(0);
   }),
 );
+
+const sourceControlWriteMethods = [
+  WS_METHODS.vcsPush,
+  WS_METHODS.vcsSync,
+  WS_METHODS.vcsPaths,
+  WS_METHODS.vcsHunk,
+  WS_METHODS.vcsStash,
+  WS_METHODS.vcsAmendCommit,
+  WS_METHODS.vcsUndoLastCommit,
+] as const;
+
+it.effect.each(sourceControlWriteMethods)(
+  "%s needs the source control write grant, and its availability follows revocation",
+  (method) =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const registry = yield* setup;
+        const command = createCommandPermissions(runtime, method);
+        registry.set(sessions(env), AsyncResult.success(grant(true)));
+        expect(registry.get(command.permissionAtom(env))).toBe(false);
+        expect((yield* command.authorize(registry, env).pipe(Effect.flip)).requiredPermission).toBe(
+          AuthSourceControlWriteScope,
+        );
+        registry.set(
+          sessions(env),
+          AsyncResult.success({
+            ...grant(false),
+            scopes: [AuthSourceControlWriteScope],
+            permissions: [AuthSourceControlWriteScope],
+          }),
+        );
+        expect(registry.get(command.permissionAtom(env))).toBe(true);
+        yield* command.authorize(registry, env);
+        registry.set(sessions(env), AsyncResult.success(grant(false)));
+        expect(registry.get(command.permissionAtom(env))).toBe(false);
+        expect((yield* command.authorize(registry, env).pipe(Effect.flip))._tag).toBe(
+          "EnvironmentAuthorizationError",
+        );
+      }),
+    ),
+);
+
+it.effect("commit message generation needs orchestration operate, not source control write", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const registry = yield* setup;
+      const generate = createCommandPermissions(runtime, WS_METHODS.gitGenerateCommitMessage);
+      registry.set(
+        sessions(env),
+        AsyncResult.success({
+          ...grant(false),
+          scopes: [AuthSourceControlWriteScope],
+          permissions: [AuthSourceControlWriteScope],
+        }),
+      );
+      expect(registry.get(generate.permissionAtom(env))).toBe(false);
+      expect((yield* generate.authorize(registry, env).pipe(Effect.flip)).requiredScope).toBe(
+        AuthOrchestrationOperateScope,
+      );
+      registry.set(sessions(env), AsyncResult.success(grant(true)));
+      expect(registry.get(generate.permissionAtom(env))).toBe(true);
+      yield* generate.authorize(registry, env);
+    }),
+  ),
+);
