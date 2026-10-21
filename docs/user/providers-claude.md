@@ -31,8 +31,8 @@ instead can put credentials where this provider will not find them.
 
 Check the account reported in provider settings after signing in. Existing
 threads can switch only between Claude instances with the same config directory.
-Separate account directories stay isolated, including their local conversation
-state. Claude does not have Codex's shared-home and shadow-home arrangement.
+Separate account directories stay isolated unless you configure shared sessions
+as described below.
 
 For presets that differ only in API keys or endpoints, use the instance's
 **Environment variables**. Variable assignments do not belong in **Launch arguments**.
@@ -40,6 +40,29 @@ For presets that differ only in API keys or endpoints, use the instance's
 Claude Code's verbose mode can stay enabled when you use Claude for text generation, including
 thread titles, branch names, commit messages, and pull request descriptions. On a remote connection,
 T3 Code uses the Claude configuration on the connected server.
+
+## Continue a conversation with another account
+
+Give both Claude instances the same **CLAUDE_CONFIG_DIR path**. On the second
+instance, set **Shadow config path** to its account's config directory. For example,
+use `~/.claude` as the shared path and `~/.claude_personal` as the shadow path.
+Sign in to the second account with
+`CLAUDE_CONFIG_DIR=~/.claude_personal claude auth login` on the environment's machine.
+Keep this path stable so Claude Code can find that account's credentials.
+
+The instances share `projects/`, including transcripts and project memory.
+Credentials, settings, skills, and plugins stay in each account's config directory.
+You can then select the other account in the conversation's model picker and
+continue the same native session.
+
+An existing `projects/` directory in the shadow path blocks setup. Stop sessions
+using that directory, back it up, and merge its contents into the shared
+directory's `projects/`, preserving conflicting files. Move the original directory
+aside before enabling the shadow path. T3 Code creates the link and never
+overwrites existing session directories. To return to separate sessions, stop
+the affected sessions, remove the shadow's `projects` link, restore its backed-up
+directory, clear **Shadow config path**, and use that account's directory as
+**CLAUDE_CONFIG_DIR path** again.
 
 ## Compact long conversations
 

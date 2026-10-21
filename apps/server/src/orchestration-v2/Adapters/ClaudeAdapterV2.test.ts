@@ -69,6 +69,7 @@ import { formatClaudeResumeCompactionQuestion } from "@t3tools/shared/claudeComp
 import * as HostProcess from "@t3tools/shared/HostProcess";
 import { getModelSelectionStringOptionValue } from "@t3tools/shared/model";
 import { SpawnExecutableResolution } from "@t3tools/shared/shell";
+import { symlinksSupported } from "@t3tools/shared/testing/symlinks";
 
 import { attachmentRelativePath } from "../../attachmentStore.ts";
 import * as ServerConfig from "../../config.ts";
@@ -1162,21 +1163,32 @@ describe("ClaudeAdapterV2 approval cancellation", () => {
 });
 
 // Opens a session with the given configured binary path and environment, runs
-// one turn, and returns the executable paths the SDK was asked to spawn and the
-// CLAUDE_CODE_ENABLE_TODO_TOOLS value it was given.
+// one turn, and captures the executable, environment, and resume id given to the SDK.
 const captureSdkExecutablePaths = Effect.fn("captureSdkExecutablePaths")(function* (
   binaryPath: string,
   environment: ProviderInstanceEnvironment = [],
+  options?: {
+    readonly settings?: Partial<ClaudeSettings>;
+    readonly resume?: boolean;
+    readonly instanceId?: ProviderInstanceId;
+    readonly providerThread?: OrchestrationV2ProviderThread;
+  },
 ) {
   const executablePaths: Array<string | undefined> = [];
   const taskToolEnvironment: Array<string | undefined> = [];
+  const configDirectories: Array<string | undefined> = [];
+  const resumeSessionIds: Array<string | undefined> = [];
+  const modelSelection = {
+    ...CLAUDE_TEST_MODEL_SELECTION,
+    instanceId: options?.instanceId ?? ClaudeAdapterV2.CLAUDE_DEFAULT_INSTANCE_ID,
+  };
   const adapter = yield* ClaudeAdapterV2.createClaudeAdapterV2(
     {
-      instanceId: ClaudeAdapterV2.CLAUDE_DEFAULT_INSTANCE_ID,
+      instanceId: modelSelection.instanceId,
       displayName: undefined,
       environment,
       enabled: true,
-      config: { ...DEFAULT_CLAUDE_SETTINGS, binaryPath },
+      config: { ...DEFAULT_CLAUDE_SETTINGS, ...options?.settings, binaryPath },
     },
     {},
   ).pipe(
@@ -1191,6 +1203,8 @@ const captureSdkExecutablePaths = Effect.fn("captureSdkExecutablePaths")(functio
         Effect.sync(() => {
           executablePaths.push(input.options.pathToClaudeCodeExecutable);
           taskToolEnvironment.push(input.options.env?.CLAUDE_CODE_ENABLE_TODO_TOOLS);
+          configDirectories.push(input.options.env?.CLAUDE_CONFIG_DIR);
+          resumeSessionIds.push(input.options.resume);
           return {
             messages: Stream.never,
             offer: () => Effect.void,
@@ -1212,14 +1226,16 @@ const captureSdkExecutablePaths = Effect.fn("captureSdkExecutablePaths")(functio
   const runtime = yield* adapter.openSession({
     threadId,
     providerSessionId: ProviderSessionId.make("provider-session-claude-binary-path"),
-    modelSelection: CLAUDE_TEST_MODEL_SELECTION,
+    modelSelection,
     runtimePolicy: CLAUDE_TEST_RUNTIME_POLICY,
   });
-  const providerThread = yield* runtime.ensureThread({
-    threadId,
-    modelSelection: CLAUDE_TEST_MODEL_SELECTION,
-    runtimePolicy: CLAUDE_TEST_RUNTIME_POLICY,
-  });
+  const providerThread = options?.providerThread
+    ? yield* runtime.resumeThread({ providerThread: options.providerThread })
+    : yield* runtime.ensureThread({
+        threadId,
+        modelSelection,
+        runtimePolicy: CLAUDE_TEST_RUNTIME_POLICY,
+      });
   yield* runtime.startTurn(
     makeClaudeTestTurnInput({
       threadId,
@@ -1228,12 +1244,61 @@ const captureSdkExecutablePaths = Effect.fn("captureSdkExecutablePaths")(functio
       attemptId: RunAttemptId.make("attempt-claude-binary-path"),
       text: "hello",
       attachments: [],
+      nativeThreadHasTurns: options?.resume ?? false,
+      modelSelection,
     }),
   );
-  return { executablePaths, taskToolEnvironment };
+  return {
+    executablePaths,
+    taskToolEnvironment,
+    configDirectories,
+    resumeSessionIds,
+    providerThread,
+  };
 });
 
 describe("ClaudeAdapterV2 executable path", () => {
+  it.effect.skipIf(!symlinksSupported)(
+    "resumes shared sessions with each shadow account's environment",
+    () =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          const fs = yield* FileSystem.FileSystem;
+          const path = yield* Path.Path;
+          const root = yield* fs.makeTempDirectoryScoped({ prefix: "t3-claude-shadow-adapter-" });
+          const shared = path.join(root, "shared");
+          yield* fs.makeDirectory(path.join(shared, "projects"), { recursive: true });
+          yield* fs.writeFileString(
+            path.join(shared, "projects", "session.jsonl"),
+            "shared session",
+          );
+          let previousThread: OrchestrationV2ProviderThread | undefined;
+          for (const account of ["first", "second", "first"]) {
+            const shadow = path.join(root, account);
+            const instanceId = ProviderInstanceId.make(`claude_${account}`);
+            const captured = yield* captureSdkExecutablePaths("claude", [], {
+              settings: { homePath: shared, shadowConfigPath: shadow },
+              resume: true,
+              instanceId,
+              ...(previousThread === undefined ? {} : { providerThread: previousThread }),
+            }).pipe(Effect.scoped);
+            previousThread = captured.providerThread;
+            assert.equal(previousThread.providerInstanceId, instanceId);
+            assert.deepEqual(captured.configDirectories, [shadow]);
+            assert.deepEqual(captured.resumeSessionIds, ["native-thread-claude-binary-path"]);
+            assert.equal(
+              yield* fs.readFileString(path.join(shadow, "projects", "session.jsonl")),
+              "shared session",
+            );
+          }
+        }),
+      ).pipe(
+        Effect.provide(
+          Layer.mergeAll(IdAllocator.layer, McpProviderSessions.layer, NodeServices.layer),
+        ),
+      ),
+  );
+
   it.effect.each([
     { source: "the default", environment: [], hostEnvironment: {}, expected: undefined },
     {

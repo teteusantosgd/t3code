@@ -68,8 +68,8 @@ import {
 } from "@t3tools/provider-core/server/snapshotSettings";
 import {
   makeClaudeCapabilitiesCacheKey,
-  makeClaudeContinuationGroupKey,
-  resolveClaudeHomePath,
+  materializeClaudeShadowConfig,
+  resolveClaudeHomeLayout,
 } from "./ClaudeHome.ts";
 import * as HostProcess from "@t3tools/shared/HostProcess";
 const decodeClaudeSettings = Schema.decodeSync(ClaudeSettings);
@@ -155,13 +155,31 @@ export const ClaudeDriver: ProviderDriver<ClaudeSettings, ClaudeDriverEnv, Path.
           Effect.provideService(Path.Path, path),
         ),
       );
-      const continuationGroupKey = yield* makeClaudeContinuationGroupKey(
-        effectiveConfig,
-        processEnv,
+      const homeLayout = yield* resolveClaudeHomeLayout(effectiveConfig, processEnv);
+      yield* materializeClaudeShadowConfig(homeLayout).pipe(
+        Effect.mapError(
+          (cause) =>
+            new ProviderDriverError({
+              driver: DRIVER_KIND,
+              instanceId,
+              detail:
+                cause._tag === "ClaudeShadowConfigEntryConflictError"
+                  ? `Back up and merge '${cause.linkPath}' into '${cause.targetPath}', then move the original directory aside to share Claude sessions.`
+                  : cause._tag === "ClaudeShadowConfigPathConflictError"
+                    ? "Use different directories for the Claude shared config and shadow config."
+                    : cause._tag === "ClaudeShadowConfigPrivateEntrySymlinkError"
+                      ? "Claude account files in the shadow config must not be symlinks."
+                      : "Failed to prepare Claude shadow config. Check directory permissions and symlink support.",
+              cause,
+            }),
+        ),
       );
-      const configDir = yield* resolveClaudeHomePath(effectiveConfig, processEnv);
+      const continuationGroupKey = homeLayout.continuationKey;
+      const configDir = homeLayout.effectiveConfigPath;
       const accountConfigPath = yield* ClaudeResetCredits.claudeAccountConfigPath(
-        effectiveConfig.homePath.trim() || processEnv.CLAUDE_CONFIG_DIR?.trim()
+        effectiveConfig.homePath.trim() ||
+          effectiveConfig.shadowConfigPath.trim() ||
+          processEnv.CLAUDE_CONFIG_DIR?.trim()
           ? configDir
           : undefined,
       );

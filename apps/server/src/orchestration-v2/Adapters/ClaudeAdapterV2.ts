@@ -121,6 +121,8 @@ import { signalProcessGroup } from "@t3tools/provider-core/server/processGroup";
 import {
   claudeSignedOutMessage,
   makeClaudeEnvironment,
+  materializeClaudeShadowConfig,
+  resolveClaudeHomeLayout,
 } from "../../provider/Drivers/ClaudeHome.ts";
 import {
   BUNDLED_CLAUDE_MODEL_CATALOG,
@@ -9305,6 +9307,7 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
               return {
                 ...threadInput.providerThread,
                 providerSessionId: input.providerSessionId,
+                providerInstanceId: adapterOptions.instanceId,
                 status: "idle" as const,
                 updatedAt,
               };
@@ -9651,6 +9654,8 @@ export const createClaudeAdapterV2 = Effect.fn("ClaudeAdapterV2Driver.create")(
     const serverConfig = yield* ServerConfig.ServerConfig;
     const continuationRequests = yield* ProviderContinuationRequests.ProviderContinuationRequests;
     const baseEnvironment = yield* mergeProviderInstanceEnvironment(environment, hostEnvironment);
+    const homeLayout = yield* resolveClaudeHomeLayout(config, baseEnvironment);
+    yield* materializeClaudeShadowConfig(homeLayout);
     const claudeEnvironment = yield* makeClaudeEnvironment(config, baseEnvironment);
     const path = yield* Path.Path;
     const crypto = yield* Crypto.Crypto;

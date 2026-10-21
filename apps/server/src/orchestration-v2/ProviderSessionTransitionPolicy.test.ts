@@ -1,7 +1,11 @@
 import { assert, it } from "@effect/vitest";
 import { ProviderDriverKind, ProviderInstanceId } from "@t3tools/contracts";
+import * as NodeServices from "@effect/platform-node/NodeServices";
+import * as Effect from "effect/Effect";
 
 import { CodexProviderCapabilitiesV2 } from "./Adapters/CodexAdapterV2.ts";
+import { ClaudeProviderCapabilitiesV2 } from "./Adapters/ClaudeAdapterV2.ts";
+import { makeClaudeContinuationGroupKey } from "../provider/Drivers/ClaudeHome.ts";
 import { decideProviderSessionTransition } from "./ProviderSessionTransitionPolicy.ts";
 
 const driver = ProviderDriverKind.make("codex");
@@ -15,6 +19,49 @@ const base = {
   workspace: "/repo",
   capabilities: CodexProviderCapabilitiesV2,
 };
+
+it.effect("resumes Claude across shadow accounts and hands off across isolated homes", () =>
+  Effect.gen(function* () {
+    const claude = ProviderDriverKind.make("claudeAgent");
+    const current = {
+      ...base,
+      driver: claude,
+      capabilities: ClaudeProviderCapabilitiesV2,
+      modelSelection: {
+        instanceId: ProviderInstanceId.make("claude_first"),
+        model: "claude-sonnet-4-6",
+      },
+      continuationIdentity: {
+        driverKind: claude,
+        continuationKey: yield* makeClaudeContinuationGroupKey({ homePath: "/shared/claude" }),
+      },
+    };
+    for (const [homePath, expected] of [
+      ["/shared/claude", "restart_and_resume"],
+      ["/isolated/claude", "create_with_handoff"],
+    ] as const) {
+      const continuationKey = yield* makeClaudeContinuationGroupKey({
+        homePath,
+        shadowConfigPath: "/account/two",
+      });
+      assert.deepEqual(
+        decideProviderSessionTransition({
+          current,
+          target: {
+            ...current,
+            continuationIdentity: { driverKind: claude, continuationKey },
+            modelSelection: {
+              ...current.modelSelection,
+              instanceId: ProviderInstanceId.make("claude_second"),
+            },
+            available: true,
+          },
+        }),
+        { type: expected },
+      );
+    }
+  }).pipe(Effect.provide(NodeServices.layer)),
+);
 
 it("reuses compatible sessions and treats interaction mode as turn-scoped", () => {
   assert.deepEqual(

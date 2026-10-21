@@ -285,18 +285,18 @@ const readSkillOverrides = Effect.fn("readSkillOverrides")(function* (
 
 /**
  * Resolve the Claude config directory the CLI would use, matching the
- * precedence the spawned CLI sees: the instance's `homePath` (exported as
- * `CLAUDE_CONFIG_DIR` by `makeClaudeEnvironment`), then a `CLAUDE_CONFIG_DIR`
+ * precedence the spawned CLI sees: the shadow path, then the instance's
+ * `homePath`, then a `CLAUDE_CONFIG_DIR`
  * already present in the process environment, then `~/.claude`.
  */
 const resolveClaudeConfigDirPath = Effect.fn("resolveClaudeConfigDirPath")(function* (
-  config: Pick<ClaudeSettings, "homePath">,
+  config: Pick<ClaudeSettings, "homePath"> & Partial<Pick<ClaudeSettings, "shadowConfigPath">>,
   environment: NodeJS.ProcessEnv,
   cwd?: string,
 ): Effect.fn.Return<string, never, Path.Path> {
   const path = yield* Path.Path;
   const home = yield* HostProcess.HomeDirectory;
-  const homePath = config.homePath.trim();
+  const homePath = config.shadowConfigPath?.trim() || config.homePath.trim();
   if (homePath.length > 0) {
     return path.resolve(expandHomePath(homePath, home));
   }
@@ -323,7 +323,7 @@ const resolveClaudeConfigDirPath = Effect.fn("resolveClaudeConfigDirPath")(funct
  * Claude Code resolves elsewhere.
  */
 export const discoverClaudeSkills = Effect.fn("discoverClaudeSkills")(function* (
-  config: Pick<ClaudeSettings, "homePath">,
+  config: Pick<ClaudeSettings, "homePath"> & Partial<Pick<ClaudeSettings, "shadowConfigPath">>,
   cwd?: string,
   environment?: NodeJS.ProcessEnv,
 ): Effect.fn.Return<ReadonlyArray<ServerProviderSkill>, never, FileSystem.FileSystem | Path.Path> {

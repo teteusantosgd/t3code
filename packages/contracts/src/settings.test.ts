@@ -266,6 +266,15 @@ describe("custom model settings", () => {
   });
 });
 
+describe("ClaudeSettings shared sessions", () => {
+  it("keeps shadow configuration opt-in for existing instances", () => {
+    expect(decodeClaudeSettings({ homePath: "~/.claude" }).shadowConfigPath).toBe("");
+    expect(
+      decodeClaudeSettings({ shadowConfigPath: "  ~/.claude-personal  " }).shadowConfigPath,
+    ).toBe("~/.claude-personal");
+  });
+});
+
 describe("ClaudeSettings auto-compaction", () => {
   it("uses Claude's default threshold when no override is configured", () => {
     expect(decodeClaudeSettings({}).autoCompactWindow).toBe("");

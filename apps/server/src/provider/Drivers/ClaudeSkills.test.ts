@@ -20,6 +20,29 @@ const writeSkill = Effect.fn(function* (
 });
 
 it.layer(NodeServices.layer)("discoverClaudeSkills", (it) => {
+  it.effect("discovers skills and overrides from the shadow account configuration", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const root = yield* fs.makeTempDirectoryScoped({ prefix: "t3-claude-shadow-skills-" });
+      const shared = path.join(root, "shared");
+      const shadow = path.join(root, "account");
+      yield* writeSkill(path.join(shared, "skills"), "shared-only", "Shared skill");
+      yield* writeSkill(path.join(shadow, "skills"), "account-only", "Account skill");
+      yield* fs.writeFileString(
+        path.join(shadow, "settings.json"),
+        JSON.stringify({
+          skillOverrides: { "account-only": "off" },
+        }),
+      );
+      const skills = yield* discoverClaudeSkills({ homePath: shared, shadowConfigPath: shadow });
+      assert.deepEqual(
+        skills.map(({ name, enabled }) => ({ name, enabled })),
+        [{ name: "account-only", enabled: false }],
+      );
+    }),
+  );
+
   it.effect("discovers user and project skills with frontmatter metadata", () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
