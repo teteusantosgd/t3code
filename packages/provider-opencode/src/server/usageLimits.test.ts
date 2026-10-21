@@ -171,6 +171,31 @@ it.effect(
     }),
 );
 
+it.effect("skips Go usage when the server setting turns limits off", () =>
+  Effect.gen(function* () {
+    const limits = yield* readOpenCodeGoUsageLimits({
+      enabled: true,
+      usageLimitsEnabled: false,
+      serverUrl: "",
+      environment: {},
+    }).pipe(
+      Effect.provideService(
+        FileSystem.FileSystem,
+        FileSystem.makeNoop({
+          readFileString: () => Effect.die("auth should not be read when limits are off"),
+        }),
+      ),
+      Effect.provideService(
+        HttpClient.HttpClient,
+        HttpClient.make(() => Effect.die("usage should not be fetched when limits are off")),
+      ),
+      Effect.provide(NodeServices.layer),
+    );
+    NodeAssert.equal(limits.unavailable?.reason, "unsupported");
+    NodeAssert.deepEqual(limits.windows, []);
+  }),
+);
+
 it.effect("reports a signed-out Console response as a failed probe", () =>
   Effect.gen(function* () {
     const { root, dataHome } = makeConsoleDb();

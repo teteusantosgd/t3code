@@ -26,7 +26,6 @@ import {
   hasSidebarUsagePreview,
   sidebarPreviewColumns,
   sidebarPreviewResetLabel,
-  sidebarPreviewShowsAggregate,
   windowsForSidebarPreview,
 } from "./usageLimitsPreviewModel";
 
@@ -52,38 +51,16 @@ function CompactWindowRow({
   readonly now: number;
 }) {
   const columns = sidebarPreviewColumns(window);
-  const showAggregate = sidebarPreviewShowsAggregate(window);
-  const nextRefill = showAggregate
-    ? window.resets.find((reset) => reset.restoresPercent > 0)
-    : undefined;
   return (
-    <div className="flex min-w-0 flex-col gap-1">
-      <div className="flex min-w-0 items-baseline gap-1.5">
-        <span className="min-w-0 truncate text-2xs text-sidebar-muted-foreground">
-          {window.label}
-        </span>
-        {showAggregate ? (
-          <>
-            <span className="ms-auto shrink-0 text-xs font-semibold text-sidebar-foreground tabular-nums">
-              {window.remainingPercent}%
-            </span>
-            {nextRefill ? (
-              <span className="shrink-0 text-2xs text-sidebar-muted-foreground tabular-nums">
-                {sidebarPreviewResetLabel(nextRefill.member.window, now)}
-              </span>
-            ) : null}
-          </>
-        ) : null}
-      </div>
-      <div
-        className="grid min-w-0 gap-0.5"
-        style={{ gridTemplateColumns: `repeat(${Math.max(columns.length, 1)}, minmax(0, 1fr))` }}
-      >
+    <div className="flex min-w-0 flex-col gap-0.5">
+      <span className="min-w-0 truncate text-2xs text-sidebar-muted-foreground">
+        {window.label}
+      </span>
+      <div className="flex min-w-0 flex-col gap-0.5">
         {columns.map((column) => {
           const accountWindow = column.window;
           const left = accountWindow ? remainingPercent(accountWindow) : 0;
-          const resetLabel =
-            !showAggregate && accountWindow ? sidebarPreviewResetLabel(accountWindow, now) : null;
+          const resetLabel = accountWindow ? sidebarPreviewResetLabel(accountWindow, now) : null;
           const title = resetLabel
             ? `${accountLabel(column)} ${left}% · ${resetLabel}`
             : `${accountLabel(column)} ${left}%`;
@@ -91,12 +68,7 @@ function CompactWindowRow({
             <Tooltip key={column.account.key}>
               <TooltipTrigger
                 render={
-                  <div
-                    className={cn(
-                      "relative min-w-0 overflow-hidden rounded-sm bg-muted",
-                      showAggregate ? "h-4" : "min-h-4",
-                    )}
-                  />
+                  <div className="relative flex h-4 min-w-0 items-center gap-1 overflow-hidden rounded-sm bg-muted px-1" />
                 }
               >
                 {/* Match Usage → Limits: translucent fill so Codex/Cursor read as soft gray. */}
@@ -105,24 +77,17 @@ function CompactWindowRow({
                   className="absolute inset-y-0 left-0 rounded-sm opacity-35"
                   style={{ width: `${left}%`, backgroundColor: color }}
                 />
-                <span
-                  className={cn(
-                    "relative flex px-1 text-3xs font-medium text-sidebar-foreground/90 tabular-nums",
-                    showAggregate
-                      ? "h-full items-center"
-                      : "min-h-4 flex-col justify-center gap-px py-0.5",
-                  )}
-                >
-                  <span className="flex min-w-0 items-center gap-1">
-                    <span className="min-w-0 truncate">{accountLabel(column)}</span>
-                    <span className="ms-auto shrink-0">{left}%</span>
-                  </span>
-                  {resetLabel ? (
-                    <span className="shrink-0 self-end text-sidebar-muted-foreground font-normal">
-                      {resetLabel}
-                    </span>
-                  ) : null}
+                <span className="relative min-w-0 flex-1 truncate text-3xs font-medium text-sidebar-foreground/90">
+                  {accountLabel(column)}
                 </span>
+                <span className="relative shrink-0 text-3xs font-semibold text-sidebar-foreground tabular-nums">
+                  {left}%
+                </span>
+                {resetLabel ? (
+                  <span className="relative shrink-0 text-3xs font-normal text-sidebar-muted-foreground tabular-nums">
+                    {resetLabel}
+                  </span>
+                ) : null}
               </TooltipTrigger>
               <TooltipPopup>{title}</TooltipPopup>
             </Tooltip>
@@ -229,7 +194,7 @@ export function SidebarUsageLimitsPreview({ className }: { readonly className?: 
           <button
             type="button"
             onClick={openUsageLimits}
-            className="flex w-full cursor-pointer flex-col gap-2.5 rounded-md px-2.5 py-2 text-left transition-colors hover:bg-sidebar-row-hover"
+            className="flex w-full cursor-pointer flex-col gap-2 rounded-md px-2.5 py-1.5 text-left transition-colors hover:bg-sidebar-row-hover"
             aria-label="Open usage limits"
           >
             {pools.map((pool) => {
@@ -238,7 +203,7 @@ export function SidebarUsageLimitsPreview({ className }: { readonly className?: 
               const label = providerClients.get(pool.driver)?.label ?? String(pool.driver);
               const color = barColor(pool.driver);
               return (
-                <section key={pool.driver} className="flex min-w-0 flex-col gap-1.5">
+                <section key={pool.driver} className="flex min-w-0 flex-col gap-1">
                   <h3 className="flex min-w-0 items-center gap-1.5 text-xs font-medium text-sidebar-foreground">
                     <ProviderInstanceIcon
                       driverKind={pool.driver}

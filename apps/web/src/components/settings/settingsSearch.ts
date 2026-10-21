@@ -685,6 +685,13 @@ export const SETTINGS_SEARCH_ITEMS = [
     macProviderSettingsOnly: true,
   },
   {
+    id: "opencode-usage-limits",
+    title: "OpenCode Go usage",
+    to: "/settings/providers",
+    searchTerms: ["opencode go session weekly monthly limits sidebar usage quota"],
+    providerSettingsOnly: true,
+  },
+  {
     id: "provider-health-check-interval",
     title: "Health check interval",
     to: "/settings/providers",

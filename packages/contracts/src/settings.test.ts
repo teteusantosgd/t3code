@@ -162,6 +162,16 @@ describe("ClientSettings rich text composer", () => {
   });
 });
 
+describe("ServerSettings OpenCode usage limits", () => {
+  it("keeps OpenCode Go limits on for settings saved before the toggle existed", () => {
+    expect(decodeServerSettings({}).openCodeUsageLimitsEnabled).toBe(true);
+    expect(DEFAULT_SERVER_SETTINGS.openCodeUsageLimitsEnabled).toBe(true);
+    expect(decodeServerSettingsPatch({ openCodeUsageLimitsEnabled: false })).toEqual({
+      openCodeUsageLimitsEnabled: false,
+    });
+  });
+});
+
 describe("ServerSettings default permissions", () => {
   it("keeps full access for settings saved before a default was configured", () => {
     expect(decodeServerSettings({}).defaultRuntimeMode).toBe("full-access");

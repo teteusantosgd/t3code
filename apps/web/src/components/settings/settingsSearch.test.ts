@@ -190,6 +190,7 @@ describe("searchSettings", () => {
       "publish-agent-activity",
       "provider-health-check-interval",
       "cursor-keychain-usage",
+      "opencode-usage-limits",
       "source-control-writer-model",
       "review-guide-model",
       "review-guide-instructions",

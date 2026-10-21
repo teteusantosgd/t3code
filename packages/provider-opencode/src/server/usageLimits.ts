@@ -221,12 +221,16 @@ function readConsoleCredential(dbPath: string) {
 /** External OpenCode servers own their credentials; never read the host's account for them. */
 export const readOpenCodeGoUsageLimits = Effect.fn("readOpenCodeGoUsageLimits")(function* (input: {
   readonly enabled: boolean;
+  /** Server setting; omit or true keeps today's default of reading Go limits. */
+  readonly usageLimitsEnabled?: boolean;
   readonly serverUrl: string;
   readonly environment: NodeJS.ProcessEnv;
 }) {
   const checkedAt = DateTime.formatIso(yield* DateTime.now);
   const unsupported = makeUnavailableUsageLimits({ checkedAt, reason: "unsupported" });
-  if (!input.enabled || input.serverUrl.trim()) return unsupported;
+  if (!input.enabled || input.usageLimitsEnabled === false || input.serverUrl.trim()) {
+    return unsupported;
+  }
 
   return yield* Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem;

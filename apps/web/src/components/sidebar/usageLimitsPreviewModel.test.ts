@@ -5,7 +5,6 @@ import { describe, expect, it } from "vite-plus/test";
 import {
   hasSidebarUsagePreview,
   sidebarPreviewResetLabel,
-  sidebarPreviewShowsAggregate,
   windowsForSidebarPreview,
 } from "./usageLimitsPreviewModel";
 
@@ -91,52 +90,6 @@ describe("hasSidebarUsagePreview", () => {
           windows: [window("session", "primary", "Session")],
         },
       ]),
-    ).toBe(true);
-  });
-});
-
-describe("sidebarPreviewShowsAggregate", () => {
-  it("keeps the header aggregate for a single account", () => {
-    expect(
-      sidebarPreviewShowsAggregate(
-        window("session", "primary", "Session", [
-          {
-            accountKey: "codex:a",
-            window: { id: "primary", kind: "session", label: "Session", usedPercent: 40 },
-          },
-        ]),
-      ),
-    ).toBe(true);
-  });
-
-  it("hides the header aggregate when two accounts report the window", () => {
-    expect(
-      sidebarPreviewShowsAggregate(
-        window("session", "primary", "Session", [
-          {
-            accountKey: "codex:a",
-            window: { id: "primary", kind: "session", label: "Session", usedPercent: 40 },
-          },
-          {
-            accountKey: "codex:b",
-            window: { id: "primary", kind: "session", label: "Session", usedPercent: 10 },
-          },
-        ]),
-      ),
-    ).toBe(false);
-  });
-
-  it("ignores column gaps when counting accounts", () => {
-    expect(
-      sidebarPreviewShowsAggregate(
-        window("session", "primary", "Session", [
-          {
-            accountKey: "codex:a",
-            window: { id: "primary", kind: "session", label: "Session", usedPercent: 40 },
-          },
-          { accountKey: "codex:b", window: null },
-        ]),
-      ),
     ).toBe(true);
   });
 });

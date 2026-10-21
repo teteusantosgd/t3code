@@ -28,14 +28,6 @@ export function sidebarPreviewColumns(window: LimitPoolWindow): LimitPoolWindow[
   return window.columns.filter((column) => column.window !== null);
 }
 
-/**
- * Aggregate % / single reset belong in the row header only when there is one
- * account. With two or more, each bar carries its own percent and reset.
- */
-export function sidebarPreviewShowsAggregate(window: LimitPoolWindow): boolean {
-  return sidebarPreviewColumns(window).length <= 1;
-}
-
 /** Compact countdown for a window, or null when the provider omitted a reset. */
 export function sidebarPreviewResetLabel(
   window: ServerProviderUsageWindow,

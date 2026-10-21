@@ -27,17 +27,19 @@ export function UsageProviderSettings({
   environmentLabel,
   sources,
   cursorKeychainUsageEnabled,
+  openCodeUsageLimitsEnabled,
   readOnly,
 }: {
   readonly environmentId: EnvironmentId;
   readonly environmentLabel: string;
   readonly sources: UnifiedSettings["usageLimitSources"];
   readonly cursorKeychainUsageEnabled: boolean;
+  readonly openCodeUsageLimitsEnabled: boolean;
   readonly readOnly: boolean;
 }) {
   const updateSettings = useUpdateEnvironmentSettings(environmentId);
-  const updateCursorSettings = useAtomCommand(serverEnvironment.updateSettings, {
-    label: "update Cursor account usage",
+  const updateUsageSettings = useAtomCommand(serverEnvironment.updateSettings, {
+    label: "update usage limit settings",
   });
   const refreshProviders = useAtomCommand(serverEnvironment.refreshProviders, {
     reportFailure: false,
@@ -46,12 +48,13 @@ export function UsageProviderSettings({
     .platform;
   const [adding, setAdding] = useState(false);
   const [updatingCursor, setUpdatingCursor] = useState(false);
+  const [updatingOpenCode, setUpdatingOpenCode] = useState(false);
   const entries = Object.entries(sources);
 
   const setCursorUsageEnabled = async (enabled: boolean) => {
     setUpdatingCursor(true);
     try {
-      const result = await updateCursorSettings({
+      const result = await updateUsageSettings({
         environmentId,
         input: { patch: { cursorKeychainUsageEnabled: enabled } },
       });
@@ -60,6 +63,21 @@ export function UsageProviderSettings({
       }
     } finally {
       setUpdatingCursor(false);
+    }
+  };
+
+  const setOpenCodeUsageLimitsEnabled = async (enabled: boolean) => {
+    setUpdatingOpenCode(true);
+    try {
+      const result = await updateUsageSettings({
+        environmentId,
+        input: { patch: { openCodeUsageLimitsEnabled: enabled } },
+      });
+      if (result._tag === "Success") {
+        await refreshProviders({ environmentId, input: {} });
+      }
+    } finally {
+      setUpdatingOpenCode(false);
     }
   };
 
@@ -91,6 +109,19 @@ export function UsageProviderSettings({
             }
           />
         ) : null}
+        <SettingsRow
+          id="opencode-usage-limits"
+          title="OpenCode Go usage"
+          description="Read OpenCode Go session, weekly, and monthly limits for Limits and the sidebar glance."
+          control={
+            <Switch
+              aria-label="OpenCode Go usage"
+              checked={openCodeUsageLimitsEnabled}
+              disabled={readOnly || updatingOpenCode}
+              onCheckedChange={(enabled) => void setOpenCodeUsageLimitsEnabled(enabled)}
+            />
+          }
+        />
         {entries.length === 0 ? (
           <SettingsRow title="No hubs configured." />
         ) : (
