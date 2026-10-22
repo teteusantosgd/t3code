@@ -11,7 +11,9 @@ import type {
 
 import * as Config from "effect/Config";
 
-export const DEFAULT_HANDOFF_TOKEN_CAP = 16_000;
+// Fork default: carry the largest handoff the byte cap allows, so long
+// conversations lose less to a provider switch.
+export const DEFAULT_HANDOFF_TOKEN_CAP = 64_000;
 const HANDOFF_BYTE_CAP = 64_000;
 export const handoffTokenCapConfig = Config.Int("T3CODE_CONTEXT_HANDOFF_TOKEN_CAP").pipe(
   Config.withDefault(DEFAULT_HANDOFF_TOKEN_CAP),
