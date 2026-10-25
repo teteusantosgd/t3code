@@ -70,6 +70,7 @@ export function useVoiceInputController(input: {
     audioLevels: global.audioLevels,
     elapsedSeconds: global.elapsedSeconds,
     isBusy,
+    isGloballyBusy: global.isBusy,
     freezesEditor: isBusy,
     blocksSubmission: isBusy,
     start,
