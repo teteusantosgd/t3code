@@ -49,7 +49,7 @@ export function preloadWorkspaceFileContents(input: {
     appAtomRegistry,
     projectEnvironment.readFile({
       environmentId: input.environmentId,
-      input: { cwd: input.cwd, relativePath: input.relativePath },
+      input: { cwd: input.cwd, relativePath: input.relativePath, suggestAlternatives: true },
     }),
     {
       label: "workspace file preload",

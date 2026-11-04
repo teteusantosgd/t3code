@@ -73,7 +73,11 @@ export function getProjectFileQueryAtom(
 ) {
   return projectEnvironment.readFile({
     environmentId,
-    input: { cwd, relativePath: relativePath ?? EMPTY_PROJECT_FILE_PATH },
+    input: {
+      cwd,
+      relativePath: relativePath ?? EMPTY_PROJECT_FILE_PATH,
+      suggestAlternatives: true,
+    },
   });
 }
 

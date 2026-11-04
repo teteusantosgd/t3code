@@ -1,5 +1,86 @@
 import { describe, expect, it } from "vite-plus/test";
-import { parseFileUrlHref, splitFilePathPosition, resolvePathLinkTarget } from "./fileLinks.ts";
+import {
+  fileLinkRecovery,
+  parseFileUrlHref,
+  splitFilePathPosition,
+  resolvePathLinkTarget,
+} from "./fileLinks.ts";
+
+describe("fileLinkRecovery", () => {
+  it("reopens only a unique candidate from a complete search", () => {
+    expect(
+      fileLinkRecovery(
+        {
+          failure: "file_not_found",
+          candidates: ["repo/src/file.ts"],
+          candidatesTruncated: false,
+        },
+        "src/file.ts",
+      ).automaticPath,
+    ).toBe("repo/src/file.ts");
+  });
+
+  it.each([
+    { failure: "file_not_found", candidates: [], candidatesTruncated: false },
+    {
+      failure: "file_not_found",
+      candidates: ["repo/file.ts", "worktree/file.ts"],
+      candidatesTruncated: false,
+    },
+    { failure: "file_not_found", candidates: ["repo/file.ts"], candidatesTruncated: true },
+    { failure: "file_not_found", candidates: ["repo/file.ts"] },
+    { failure: "operation_failed", candidates: ["repo/file.ts"], candidatesTruncated: false },
+    { failure: "binary_file", candidates: ["repo/file.ts"], candidatesTruncated: false },
+    {},
+    null,
+  ])(
+    "does not choose automatically with ambiguity, partial data, or another failure: %j",
+    (error) => {
+      expect(fileLinkRecovery(error, "file.ts").automaticPath).toBeNull();
+    },
+  );
+
+  it.each([
+    "/outside/file.ts",
+    "C:\\outside\\file.ts",
+    "~/file.ts",
+    "~\\file.ts",
+    "../file.ts",
+    "repo/../file.ts",
+    "./file.ts",
+    "file.ts",
+    "",
+  ])("rejects unsafe or self-referencing candidate %s", (candidate) => {
+    const recovery = fileLinkRecovery(
+      {
+        failure: "file_not_found",
+        candidates: [candidate],
+        candidatesTruncated: false,
+      },
+      "file.ts",
+    );
+    expect(recovery.candidates).toEqual([]);
+    expect(recovery.automaticPath).toBeNull();
+  });
+
+  it("does not hide ambiguity by filtering or deduplicating bad server suggestions", () => {
+    for (const candidates of [
+      ["repo/file.ts", "../file.ts"],
+      ["repo/file.ts", "repo/file.ts"],
+    ]) {
+      expect(
+        fileLinkRecovery(
+          {
+            failure: "file_not_found",
+            candidates,
+            candidatesTruncated: false,
+          },
+          "file.ts",
+        ).automaticPath,
+      ).toBeNull();
+    }
+  });
+});
 
 describe("parseFileUrlHref", () => {
   it.each([

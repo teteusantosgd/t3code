@@ -52,6 +52,22 @@ describe("project search inputs", () => {
 });
 
 describe("project RPC errors", () => {
+  it("round-trips bounded missing-file suggestions without exposing the platform cause", () => {
+    const decode = Schema.decodeUnknownSync(ProjectReadFileError);
+    const error = new ProjectReadFileError({
+      cwd: "/workspace",
+      relativePath: "src/file.ts",
+      failure: "file_not_found",
+      resolvedPath: "/workspace/src/file.ts",
+      candidates: ["repo/src/file.ts"],
+      candidatesTruncated: false,
+      cause: new Error("sensitive platform detail"),
+    });
+    const decoded = decode(JSON.parse(JSON.stringify(error)));
+    expect(decoded.candidates).toEqual(["repo/src/file.ts"]);
+    expect(decoded.candidatesTruncated).toBe(false);
+    expect(decoded.message).not.toContain("sensitive platform detail");
+  });
   it("derives stable messages from structured request context while retaining causes", () => {
     const cause = new Error("sensitive platform detail");
     const searchError = new ProjectSearchEntriesError({

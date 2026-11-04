@@ -21,6 +21,7 @@ const decodeReadError = Schema.decodeSync(ProjectReadFileError);
 
 describe("file preview read errors", () => {
   it.each([
+    ["file_not_found", "The file was not found at this path."],
     ["path_not_file", "The path is a directory or special file, not a regular file."],
     ["binary_file", "The file is binary and cannot be displayed as text."],
     ["workspace_path_outside_root", "The requested path is outside the workspace."],

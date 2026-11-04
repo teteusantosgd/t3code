@@ -11,6 +11,7 @@
  */
 import * as NodeFS from "node:fs";
 import * as NodeFSP from "node:fs/promises";
+import { PROJECT_READ_FILE_PATH_MAX_LENGTH } from "@t3tools/contracts";
 
 import type {
   FilesystemEntryMetadata,
@@ -22,6 +23,7 @@ import type {
   ProjectWriteFileResult,
 } from "@t3tools/contracts";
 import { expandHomePath } from "@t3tools/provider-core/server/pathExpansion";
+import { isWindowsAbsolutePath } from "@t3tools/shared/path";
 import * as HostProcess from "@t3tools/shared/HostProcess";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
@@ -35,6 +37,26 @@ import * as WorkspacePaths from "./WorkspacePaths.ts";
 import { fileHeaderMimeType } from "./fileHeaderMimeType.ts";
 
 const PROJECT_READ_FILE_MAX_BYTES = 1024 * 1024;
+const FILE_CANDIDATE_MAX_ENTRIES = 25_000;
+const FILE_CANDIDATE_MAX_DIRECTORIES = 512;
+const FILE_CANDIDATE_MAX_RESULTS = 20;
+const FILE_CANDIDATE_TIME_BUDGET_MS = 2_000;
+
+export class WorkspaceFileNotFoundError extends Schema.TaggedError<WorkspaceFileNotFoundError>()(
+  "WorkspaceFileNotFoundError",
+  {
+    workspaceRoot: Schema.String,
+    relativePath: Schema.String,
+    resolvedPath: Schema.String,
+    candidates: Schema.Array(Schema.String),
+    candidatesTruncated: Schema.Boolean,
+    cause: Schema.Defect(),
+  },
+) {
+  override get message(): string {
+    return "The requested file was not found.";
+  }
+}
 
 export class WorkspaceFileSystemOperationError extends Schema.TaggedError<WorkspaceFileSystemOperationError>()(
   "WorkspaceFileSystemOperationError",
@@ -102,6 +124,7 @@ export class WorkspaceBinaryFileError extends Schema.TaggedError<WorkspaceBinary
 }
 
 export const WorkspaceFileSystemError = Schema.Union([
+  WorkspaceFileNotFoundError,
   WorkspaceFileSystemOperationError,
   WorkspaceFilePathEscapeError,
   WorkspacePathNotFileError,
@@ -264,10 +287,125 @@ export const make = Effect.gen(function* () {
     return { relativePath: target.relativePath, realTargetPath };
   });
 
+  // Search only after an opted-in read misses. Ignore rules cannot hide a second
+  // repository copy; directory symlinks and partial scans prevent automatic choice.
+  const findReadAlternatives = async (cwd: string, requestedPath: string, signal: AbortSignal) => {
+    const candidates: string[] = [];
+    let candidatesTruncated = false;
+    const root = await NodeFSP.realpath(cwd);
+    const suffix = path.normalize(requestedPath).split(path.sep).join("/").replace(/^\.\//, "");
+    const excludedDirectories = new Set([".git", "node_modules"]);
+    if (suffix.split("/").some((segment) => excludedDirectories.has(segment))) {
+      return { candidates, candidatesTruncated };
+    }
+    const insideRoot = (target: string) => {
+      const relative = path.relative(root, target);
+      return (
+        relative !== ".." && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative)
+      );
+    };
+    const directories = [""];
+    const startedAt = performance.now();
+    let entries = 0;
+    let visited = 0;
+    for (let offset = 0; offset < directories.length; offset++) {
+      if (
+        signal.aborted ||
+        ++visited > FILE_CANDIDATE_MAX_DIRECTORIES ||
+        performance.now() - startedAt > FILE_CANDIDATE_TIME_BUDGET_MS
+      ) {
+        candidatesTruncated = true;
+        break;
+      }
+      try {
+        const directory = await NodeFSP.realpath(path.join(root, directories[offset]!));
+        if (!insideRoot(directory)) continue;
+        const handle = await NodeFSP.opendir(directory);
+        for await (const entry of handle) {
+          if (
+            signal.aborted ||
+            ++entries > FILE_CANDIDATE_MAX_ENTRIES ||
+            performance.now() - startedAt > FILE_CANDIDATE_TIME_BUDGET_MS
+          ) {
+            return { candidates: candidates.toSorted(), candidatesTruncated: true };
+          }
+          const relativePath = directories[offset]
+            ? `${directories[offset]}/${entry.name}`
+            : entry.name;
+          if (excludedDirectories.has(entry.name)) continue;
+          if (entry.isDirectory()) {
+            directories.push(relativePath);
+            continue;
+          }
+          if (!entry.isFile() && !entry.isSymbolicLink()) continue;
+          const matches = relativePath === suffix || relativePath.endsWith(`/${suffix}`);
+          if (!matches && !entry.isSymbolicLink()) continue;
+          try {
+            const canonicalPath = await NodeFSP.realpath(path.join(root, relativePath));
+            if (!insideRoot(canonicalPath)) continue;
+            const stat = await NodeFSP.stat(canonicalPath);
+            if (stat.isDirectory()) {
+              candidatesTruncated = true;
+            } else if (matches && stat.isFile()) {
+              if (relativePath.length > PROJECT_READ_FILE_PATH_MAX_LENGTH) {
+                candidatesTruncated = true;
+                continue;
+              }
+              if (candidates.length === FILE_CANDIDATE_MAX_RESULTS) {
+                return { candidates: candidates.toSorted(), candidatesTruncated: true };
+              }
+              candidates.push(relativePath);
+            }
+          } catch {
+            candidatesTruncated = true;
+          }
+        }
+      } catch {
+        candidatesTruncated = true;
+      }
+    }
+    return { candidates: candidates.toSorted(), candidatesTruncated };
+  };
+
   const readFile: WorkspaceFileSystem["Service"]["readFile"] = Effect.fn(
     "WorkspaceFileSystem.readFile",
   )(function* (input) {
-    const target = yield* resolveReadTarget(input);
+    const target = yield* resolveReadTarget(input).pipe(
+      Effect.catchTags({
+        WorkspaceFileSystemOperationError: (error) => {
+          const requestedPath = input.relativePath.trim();
+          const missing =
+            typeof error.cause === "object" &&
+            error.cause !== null &&
+            "code" in error.cause &&
+            error.cause.code === "ENOENT";
+          if (
+            !input.suggestAlternatives ||
+            !missing ||
+            error.operation !== "realpath-target" ||
+            path.isAbsolute(requestedPath) ||
+            isWindowsAbsolutePath(requestedPath) ||
+            requestedPath.startsWith("~/") ||
+            requestedPath.split(/[\\/]/).includes("..")
+          ) {
+            return Effect.fail(error);
+          }
+          return Effect.gen(function* () {
+            const alternatives = yield* Effect.tryPromise({
+              try: (signal) => findReadAlternatives(input.cwd, requestedPath, signal),
+              catch: () => undefined,
+            }).pipe(Effect.orElseSucceed(() => ({ candidates: [], candidatesTruncated: true })));
+            return yield* new WorkspaceFileNotFoundError({
+              workspaceRoot: input.cwd,
+              relativePath: input.relativePath,
+              resolvedPath: error.resolvedPath,
+              ...alternatives,
+              cause: error,
+            });
+          });
+        },
+      }),
+    );
     const realTargetPath = target.realTargetPath;
 
     return yield* Effect.acquireUseRelease(

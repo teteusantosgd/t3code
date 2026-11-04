@@ -38,6 +38,32 @@ export interface FilePathPosition {
   readonly column?: number;
 }
 
+/** A preview may redirect only when the server completed its search with one valid choice. */
+export function fileLinkRecovery(
+  error: {
+    readonly failure?: string | undefined;
+    readonly candidates?: ReadonlyArray<string> | undefined;
+    readonly candidatesTruncated?: boolean | undefined;
+  } | null,
+  requestedPath: string | null,
+) {
+  const offered = error?.failure === "file_not_found" ? (error.candidates ?? []) : [];
+  const candidates = [...new Set(offered)].filter(
+    (candidate) =>
+      candidate.length > 0 &&
+      !isAbsolutePath(candidate) &&
+      !/^~[\\/]/.test(candidate) &&
+      !candidate.split(/[\\/]/).some((segment) => segment === ".." || segment === ".") &&
+      candidate !== requestedPath,
+  );
+  const truncated = error?.candidatesTruncated !== false || candidates.length !== offered.length;
+  return {
+    candidates,
+    truncated,
+    automaticPath: !truncated && candidates.length === 1 ? candidates[0]! : null,
+  };
+}
+
 export function splitFilePathPosition(path: string, hash = ""): FilePathPosition {
   const suffixMatch = path.match(POSITION_SUFFIX_CAPTURE_PATTERN);
   const match = suffixMatch ?? hash.match(POSITION_HASH_PATTERN);

@@ -1,4 +1,5 @@
 import { Spinner } from "~/components/ui/spinner";
+import { InlineButton } from "~/components/ui/button";
 import {
   AuthPreviewOperateScope,
   type EditorId,
@@ -58,7 +59,7 @@ import { PREFERRED_HIGHLIGHTER } from "~/lib/syntaxHighlighting";
 import { cn } from "~/lib/utils";
 import type { ChatFileAttachment } from "~/types";
 import { isAbsolutePath } from "@t3tools/shared/path";
-import { resolvePathLinkTarget } from "@t3tools/shared/fileLinks";
+import { fileLinkRecovery, resolvePathLinkTarget } from "@t3tools/shared/fileLinks";
 import { ScrollArea } from "~/components/ui/scroll-area";
 import { stackedThreadToast, toastManager } from "~/components/ui/toast";
 import { type DraftId, useComposerDraftStore } from "~/composerDraftStore";
@@ -129,6 +130,7 @@ interface FilePreviewPanelProps {
   revealLine: number | null;
   revealRequestId: number;
   onOpenFile: (relativePath: string) => void;
+  onResolveFile: (requestedPath: string, resolvedPath: string, line?: number) => void;
   onPendingChange: (relativePath: string, pending: boolean) => void;
   selectedFilePending: boolean;
   workspaceMutationId: string | null;
@@ -1038,6 +1040,7 @@ export default function FilePreviewPanel({
   revealLine,
   revealRequestId,
   onOpenFile,
+  onResolveFile,
   onPendingChange,
   selectedFilePending,
   workspaceMutationId,
@@ -1083,6 +1086,26 @@ export default function FilePreviewPanel({
     attachment === undefined && relativePath !== null,
   );
   const attemptedPath = file.readError?.resolvedPath ?? file.readError?.operationPath;
+  const recovery = fileLinkRecovery(file.readError, relativePath);
+  useEffect(() => {
+    if (
+      !isHostFile &&
+      relativePath !== null &&
+      file.data === null &&
+      !file.isPending &&
+      recovery.automaticPath
+    ) {
+      onResolveFile(relativePath, recovery.automaticPath, revealLine ?? undefined);
+    }
+  }, [
+    file.data,
+    file.isPending,
+    isHostFile,
+    onResolveFile,
+    recovery.automaticPath,
+    relativePath,
+    revealLine,
+  ]);
   // A chat link cannot tell a folder from a file, so a folder arrives here as
   // a file surface and the read fails. Keep the breadcrumbs, drop the preview
   // pane, and let the tree fill the surface with the folder revealed. Mutation
@@ -1413,6 +1436,32 @@ export default function FilePreviewPanel({
                     <code className="block break-all font-mono text-foreground select-all">
                       {attemptedPath}
                     </code>
+                  </p>
+                ) : null}
+                {!isHostFile && recovery.candidates.length > 0 ? (
+                  <div className="flex flex-col items-center gap-2">
+                    <p>Choose the file you meant to open:</p>
+                    {recovery.candidates.map((candidate) => (
+                      <div
+                        key={candidate}
+                        className="max-w-full [--inline-button-white-space:normal]"
+                      >
+                        <InlineButton
+                          onClick={() =>
+                            onResolveFile(relativePath, candidate, revealLine ?? undefined)
+                          }
+                        >
+                          <code className="break-all text-xs">{candidate}</code>
+                        </InlineButton>
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
+                {!isHostFile &&
+                file.readError?.failure === "file_not_found" &&
+                recovery.truncated ? (
+                  <p className="text-muted-foreground">
+                    The search could not cover the whole workspace. More matches may exist.
                   </p>
                 ) : null}
                 {!isHostFile ? (

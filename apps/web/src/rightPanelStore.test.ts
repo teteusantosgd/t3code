@@ -30,6 +30,54 @@ beforeEach(() => {
 });
 
 describe("rightPanelStore", () => {
+  it("replaces a missing file tab with the recovered path and keeps the requested line", () => {
+    const store = useRightPanelStore.getState();
+    store.openFile(refA, "src/file.ts", 42);
+    store.resolveFile(refA, "src/file.ts", "repo/src/file.ts", 42);
+    const state = selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, refA);
+    expect(state.surfaces).toHaveLength(1);
+    expect(state.surfaces[0]).toMatchObject({
+      id: "file:repo/src/file.ts",
+      relativePath: "repo/src/file.ts",
+      revealLine: 42,
+    });
+    expect(state.activeSurfaceId).toBe("file:repo/src/file.ts");
+    expect(useClosedViewStore.getState().entries).toEqual([]);
+  });
+
+  it("reuses a recovered file already open instead of duplicating its tab", () => {
+    const store = useRightPanelStore.getState();
+    store.openFile(refA, "repo/src/file.ts", 2);
+    store.openFile(refA, "src/file.ts", 42);
+    store.resolveFile(refA, "src/file.ts", "repo/src/file.ts", 42);
+    const state = selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, refA);
+    expect(state.surfaces).toHaveLength(1);
+    expect(state.surfaces[0]).toMatchObject({ relativePath: "repo/src/file.ts", revealLine: 42 });
+  });
+
+  it("does not redirect after the user switches tabs, hides the panel, or changes thread", () => {
+    const store = useRightPanelStore.getState();
+    store.openFile(refA, "src/file.ts");
+    store.open(refA, "diff");
+    store.resolveFile(refA, "src/file.ts", "repo/src/file.ts");
+    expect(
+      selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, refA).activeSurfaceId,
+    ).toBe("diff");
+    store.activateSurface(refA, "file:src/file.ts");
+    store.close(refA);
+    store.resolveFile(refA, "src/file.ts", "repo/src/file.ts");
+    expect(
+      selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, refA).isOpen,
+    ).toBe(false);
+    store.openFile(refB, "other.ts");
+    store.resolveFile(refB, "src/file.ts", "repo/src/file.ts");
+    expect(
+      selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, refB).surfaces,
+    ).toHaveLength(1);
+    expect(
+      selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, refB).activeSurfaceId,
+    ).toBe("file:other.ts");
+  });
   it("records single and bulk tab closes, newest first", () => {
     const store = useRightPanelStore.getState();
     const pr = pullRequestSurface({

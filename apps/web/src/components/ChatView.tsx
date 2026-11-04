@@ -5556,6 +5556,13 @@ export default function ChatView(props: ChatViewProps) {
     useRightPanelStore.getState().openFile(activeThreadRef, relativePath);
   };
   const openFileSurfaceStable = useStableCallback(openFileSurface);
+  const resolveFileSurface = useCallback(
+    (requestedPath: string, resolvedPath: string, line?: number) => {
+      if (!activeThreadRef) return;
+      useRightPanelStore.getState().resolveFile(activeThreadRef, requestedPath, resolvedPath, line);
+    },
+    [activeThreadRef],
+  );
   // The thread's own change request, placed against the project it belongs to. Without a
   // project there is nothing to resolve it against, so the caller falls back to the browser.
   const persistedLinkedThreadPullRequest = isServerThread
@@ -11027,6 +11034,7 @@ export default function ChatView(props: ChatViewProps) {
               : 0
           }
           onOpenFile={openFileSurfaceStable}
+          onResolveFile={resolveFileSurface}
           onPendingChange={handleFilePendingChangeStable}
           selectedFilePending={
             renderedRightPanelSurface.kind === "file" &&

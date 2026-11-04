@@ -155,6 +155,12 @@ interface RightPanelStoreState {
   renameDevice: (ref: ScopedThreadRef, surfaceId: string, title: string) => void;
   openBrowser: (ref: ScopedThreadRef, tabId: string | null) => void;
   openFile: (ref: ScopedThreadRef, relativePath: string, line?: number) => void;
+  resolveFile: (
+    ref: ScopedThreadRef,
+    requestedPath: string,
+    resolvedPath: string,
+    line?: number,
+  ) => void;
   openAttachment: (ref: ScopedThreadRef, attachment: ChatFileAttachment) => void;
   openPullRequest: (
     ref: ScopedThreadRef,
@@ -743,6 +749,39 @@ export const useRightPanelStore = create<RightPanelStoreState>()(
                     entry.id === surface.id ? surface : entry,
                   )
                 : [...withoutStandaloneExplorer, surface],
+            };
+          }),
+        ),
+      resolveFile: (ref, requestedPath, resolvedPath, line) =>
+        set((state) =>
+          automaticUpdate(state, scopedThreadKey(ref), (current) => {
+            const originalId = `file:${requestedPath}`;
+            if (
+              !current.isOpen ||
+              current.activeSurfaceId !== originalId ||
+              requestedPath === resolvedPath ||
+              !current.surfaces.some(
+                (entry) => entry.id === originalId && entry.kind === "file" && !entry.attachment,
+              )
+            ) {
+              return current;
+            }
+            const existing = current.surfaces.find(
+              (surface) => surface.kind === "file" && surface.relativePath === resolvedPath,
+            );
+            const surface = fileSurface(
+              resolvedPath,
+              normalizeRevealLine(line),
+              (existing?.kind === "file" ? existing.revealRequestId : 0) + 1,
+            );
+            return {
+              ...current,
+              activeSurfaceId: surface.id,
+              surfaces: existing
+                ? current.surfaces
+                    .filter((entry) => entry.id !== originalId)
+                    .map((entry) => (entry.id === existing.id ? surface : entry))
+                : current.surfaces.map((entry) => (entry.id === originalId ? surface : entry)),
             };
           }),
         ),

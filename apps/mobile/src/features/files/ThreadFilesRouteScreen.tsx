@@ -3,10 +3,19 @@ import { environmentSession } from "../../state/session";
 import { NativeStackScreenOptions } from "../../native/StackHeader";
 import { StackActions, useNavigation, type StaticScreenProps } from "@react-navigation/native";
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
-import { Platform, View } from "react-native";
+import { Platform, ScrollView, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import Svg, { Defs, LinearGradient, Rect, Stop } from "react-native-svg";
-import { EnvironmentId, type ProjectReadFileResult, ThreadId } from "@t3tools/contracts";
+import {
+  EnvironmentId,
+  ProjectReadFileError,
+  type ProjectReadFileResult,
+  ThreadId,
+} from "@t3tools/contracts";
+import * as Schema from "effect/Schema";
+import { fileLinkRecovery } from "@t3tools/shared/fileLinks";
+import { AppText } from "../../components/AppText";
+import { MaterialButton } from "../../components/MaterialButton";
 import { videoMimeType } from "@t3tools/shared/video";
 import {
   isWorkspaceBrowserPreviewPath,
@@ -176,6 +185,7 @@ function FileHeader(props: {
 }
 
 type FileViewMode = "preview" | "source";
+const isProjectReadFileError = Schema.is(ProjectReadFileError);
 
 // A blank param (a hand-typed deep link) is treated as missing, since branded
 // IDs reject whitespace-only values.
@@ -704,14 +714,16 @@ export function ThreadFileScreen(props: ThreadFileRouteScreenProps) {
       environmentId !== null &&
       cwd !== null &&
       relativePath !== null &&
-      needsFileContents
+      (needsFileContents || assetPreview._tag === "Failure")
       ? projectEnvironment.readFile({
           environmentId,
-          input: { cwd, relativePath },
+          input: { cwd, relativePath, suggestAlternatives: true },
         })
       : null,
   );
   const fileData = fileQuery.data as ProjectReadFileResult | null;
+  const readError = isProjectReadFileError(fileQuery.failureCause) ? fileQuery.failureCause : null;
+  const recovery = fileLinkRecovery(readError, relativePath);
 
   const handleSelectFile = useCallback(
     (path: string) => {
@@ -737,6 +749,26 @@ export function ThreadFileScreen(props: ThreadFileRouteScreenProps) {
     },
     [cwd, environmentId, navigation, projectName, threadId],
   );
+  const handleRecoverFile = useCallback(
+    (path: string) => {
+      navigation.dispatch(
+        StackActions.replace(threadId === null ? "NewTaskFile" : "ThreadFile", {
+          environmentId: String(environmentId),
+          ...(threadId === null
+            ? { ...(cwd === null ? {} : { cwd }), projectName }
+            : { threadId: String(threadId) }),
+          path: path.split("/"),
+          ...(targetLine === null ? {} : { line: String(targetLine) }),
+        }),
+      );
+    },
+    [cwd, environmentId, navigation, projectName, targetLine, threadId],
+  );
+  useEffect(() => {
+    if (fileData === null && !fileQuery.isPending && recovery.automaticPath) {
+      handleRecoverFile(recovery.automaticPath);
+    }
+  }, [fileData, fileQuery.isPending, handleRecoverFile, recovery.automaticPath]);
   const renderInspector = useCallback(
     (headerInset: number) =>
       fileInspector.supported && environmentId !== null && cwd !== null ? (
@@ -950,25 +982,48 @@ export function ThreadFileScreen(props: ThreadFileRouteScreenProps) {
         actions={fileMenuActions}
       />
       <MaterialScreenContent>
-        <FileContent
-          key={previewKey}
-          activeMode={resolvedActiveMode}
-          cwd={cwd}
-          environmentId={environmentId}
-          previewUri={previewUri}
-          previewFailure={assetPreview._tag === "Failure" ? assetPreview.reason : null}
-          onRetryPreview={handleRetryPreview}
-          videoSource={videoSource}
-          mediaSource={mediaSource}
-          resolveVideoUri={assetPreview.refresh}
-          fileContents={fileData?.contents ?? null}
-          fileError={fileQuery.error}
-          initialLine={targetLine}
-          relativePath={relativePath}
-          threadId={threadId}
-          truncated={fileData?.truncated ?? false}
-          onRefresh={() => fileQuery.refresh()}
-        />
+        {readError?.failure === "file_not_found" ? (
+          <ScrollView contentContainerClassName="grow justify-center gap-3 px-6 py-8">
+            <AppText>The file was not found at this path.</AppText>
+            {recovery.candidates.length > 0 ? (
+              <AppText>Choose the file you meant to open:</AppText>
+            ) : null}
+            {recovery.candidates.map((candidate) => (
+              <MaterialButton
+                key={candidate}
+                label={candidate}
+                fullWidth
+                onPress={() => handleRecoverFile(candidate)}
+              />
+            ))}
+            {recovery.truncated ? (
+              <AppText>
+                The search could not cover the whole workspace. More matches may exist.
+              </AppText>
+            ) : null}
+            <MaterialButton label="Try again" onPress={() => fileQuery.refresh()} />
+          </ScrollView>
+        ) : (
+          <FileContent
+            key={previewKey}
+            activeMode={resolvedActiveMode}
+            cwd={cwd}
+            environmentId={environmentId}
+            previewUri={previewUri}
+            previewFailure={assetPreview._tag === "Failure" ? assetPreview.reason : null}
+            onRetryPreview={handleRetryPreview}
+            videoSource={videoSource}
+            mediaSource={mediaSource}
+            resolveVideoUri={assetPreview.refresh}
+            fileContents={fileData?.contents ?? null}
+            fileError={fileQuery.error}
+            initialLine={targetLine}
+            relativePath={relativePath}
+            threadId={threadId}
+            truncated={fileData?.truncated ?? false}
+            onRefresh={() => fileQuery.refresh()}
+          />
+        )}
       </MaterialScreenContent>
       <FilePreviewModal
         source={fullScreenPreview}

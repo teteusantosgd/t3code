@@ -520,8 +520,17 @@ function projectFileFailureContext(
   readonly resolvedWorkspaceRoot?: string;
   readonly operation?: ProjectFileOperation;
   readonly operationPath?: string;
+  readonly candidates?: ReadonlyArray<string>;
+  readonly candidatesTruncated?: boolean;
 } {
   switch (error._tag) {
+    case "WorkspaceFileNotFoundError":
+      return {
+        failure: "file_not_found",
+        resolvedPath: error.resolvedPath,
+        candidates: error.candidates,
+        candidatesTruncated: error.candidatesTruncated,
+      };
     case "WorkspacePathOutsideRootError":
       return { failure: "workspace_path_outside_root" };
     case "WorkspaceFileSystemOperationError":

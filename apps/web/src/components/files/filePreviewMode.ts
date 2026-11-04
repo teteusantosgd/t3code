@@ -12,6 +12,8 @@ export const isMarkdownPreviewFile = (path: string): boolean => /\.(?:md|mdx)$/i
 /** Describe existing failure codes without exposing the underlying platform cause. */
 export function filePreviewReadErrorMessage(error: ProjectReadFileError): string {
   switch (error.failure) {
+    case "file_not_found":
+      return "The file was not found at this path.";
     case "path_not_file":
       return "The path is a directory or special file, not a regular file.";
     case "binary_file":

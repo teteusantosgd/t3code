@@ -18,7 +18,7 @@ import {
 const PROJECT_SEARCH_ENTRIES_MAX_LIMIT = 200;
 const PROJECT_SEARCH_CONTENTS_MAX_LIMIT = 500;
 const PROJECT_WRITE_FILE_PATH_MAX_LENGTH = 512;
-const PROJECT_READ_FILE_PATH_MAX_LENGTH = 512;
+export const PROJECT_READ_FILE_PATH_MAX_LENGTH = 512;
 
 export const ProjectScriptIcon = Schema.Literals([
   "play",
@@ -438,6 +438,8 @@ export const ProjectReadFileInput = Schema.Struct({
   // Workspace-relative, or an absolute host path for a file outside the
   // workspace. Only workspace-relative paths can be written back.
   relativePath: TrimmedNonEmptyString.check(Schema.isMaxLength(PROJECT_READ_FILE_PATH_MAX_LENGTH)),
+  // Preview clients may request suggestions; the read never substitutes another file.
+  suggestAlternatives: Schema.optional(Schema.Boolean),
 });
 export type ProjectReadFileInput = typeof ProjectReadFileInput.Type;
 
@@ -450,6 +452,7 @@ export const ProjectReadFileResult = Schema.Struct({
 export type ProjectReadFileResult = typeof ProjectReadFileResult.Type;
 
 export const ProjectFileFailure = Schema.Literals([
+  "file_not_found",
   "workspace_path_outside_root",
   "resolved_path_outside_root",
   "path_not_file",
@@ -479,6 +482,8 @@ type ProjectFileFailureContext = {
   readonly operation?: ProjectFileOperation;
   readonly operationPath?: string;
   readonly cause?: unknown;
+  readonly candidates?: ReadonlyArray<string>;
+  readonly candidatesTruncated?: boolean;
 };
 
 export class ProjectReadFileError extends Schema.TaggedError<ProjectReadFileError>()(
@@ -493,6 +498,12 @@ export class ProjectReadFileError extends Schema.TaggedError<ProjectReadFileErro
     operationPath: Schema.optional(TrimmedNonEmptyString),
     message: TrimmedNonEmptyString,
     cause: Schema.optional(Schema.Defect()),
+    candidates: Schema.optional(
+      Schema.Array(
+        TrimmedNonEmptyString.check(Schema.isMaxLength(PROJECT_READ_FILE_PATH_MAX_LENGTH)),
+      ).check(Schema.isMaxLength(20)),
+    ),
+    candidatesTruncated: Schema.optional(Schema.Boolean),
   },
 ) {
   // @effect-diagnostics-next-line overriddenSchemaConstructor:off

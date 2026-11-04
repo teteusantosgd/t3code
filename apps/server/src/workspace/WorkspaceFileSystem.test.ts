@@ -17,6 +17,8 @@ import * as WorkspacePaths from "./WorkspacePaths.ts";
 import * as HostProcess from "@t3tools/shared/HostProcess";
 import { symlinksSupported } from "@t3tools/shared/testing/symlinks";
 
+const hostPlatform = HostProcess.Platform.defaultValue();
+
 const layerProject = WorkspaceFileSystem.layer.pipe(
   Layer.provide(WorkspacePaths.layer),
   Layer.provide(WorkspaceEntries.layer.pipe(Layer.provide(WorkspacePaths.layer))),
@@ -147,6 +149,413 @@ it.layer(layerTest, { excludeTestServices: true })("WorkspaceFileSystemLive", (i
   });
 
   describe("readFile", () => {
+    it.effect.skipIf(!symlinksSupported)(
+      "ignores symlinked dependency folders without making the source search incomplete",
+      () =>
+        Effect.gen(function* () {
+          const service = yield* WorkspaceFileSystem.WorkspaceFileSystem;
+          const cwd = yield* makeTempDir;
+          const fs = yield* FileSystem.FileSystem;
+          const path = yield* Path.Path;
+          yield* writeTextFile(cwd, "repo/src/file.ts", "source");
+          yield* fs.symlink(path.join(cwd, "repo"), path.join(cwd, "node_modules"));
+          expect(
+            yield* service
+              .readFile({
+                cwd,
+                relativePath: "src/file.ts",
+                suggestAlternatives: true,
+              })
+              .pipe(Effect.result),
+          ).toMatchObject({
+            failure: {
+              candidates: ["repo/src/file.ts"],
+              candidatesTruncated: false,
+            },
+          });
+        }),
+    );
+
+    it.effect("does not recover when the workspace itself is missing", () =>
+      Effect.gen(function* () {
+        const service = yield* WorkspaceFileSystem.WorkspaceFileSystem;
+        const cwd = yield* makeTempDir;
+        const path = yield* Path.Path;
+        expect(
+          yield* service
+            .readFile({
+              cwd: path.join(cwd, "missing-root"),
+              relativePath: "file.ts",
+              suggestAlternatives: true,
+            })
+            .pipe(Effect.result),
+        ).toMatchObject({
+          failure: {
+            _tag: "WorkspaceFileSystemOperationError",
+            operation: "realpath-workspace-root",
+          },
+        });
+      }),
+    );
+
+    it.effect.skipIf(hostPlatform === "win32" || process.getuid?.() === 0)(
+      "keeps permission failures and marks unreadable subtrees as incomplete",
+      () =>
+        Effect.gen(function* () {
+          const service = yield* WorkspaceFileSystem.WorkspaceFileSystem;
+          const cwd = yield* makeTempDir;
+          const fs = yield* FileSystem.FileSystem;
+          const path = yield* Path.Path;
+          yield* writeTextFile(cwd, "denied/src/file.ts", "hidden duplicate");
+          yield* writeTextFile(cwd, "repo/src/file.ts", "visible");
+          const denied = path.join(cwd, "denied");
+          yield* fs.chmod(denied, 0o000);
+          const results = yield* Effect.gen(function* () {
+            const unreadable = yield* service
+              .readFile({
+                cwd,
+                relativePath: "denied/src/file.ts",
+                suggestAlternatives: true,
+              })
+              .pipe(Effect.result);
+            const incomplete = yield* service
+              .readFile({
+                cwd,
+                relativePath: "src/file.ts",
+                suggestAlternatives: true,
+              })
+              .pipe(Effect.result);
+            return { unreadable, incomplete };
+          }).pipe(Effect.ensuring(fs.chmod(denied, 0o755).pipe(Effect.orDie)));
+          expect(results.unreadable).toMatchObject({
+            failure: { _tag: "WorkspaceFileSystemOperationError" },
+          });
+          expect(results.incomplete).toMatchObject({
+            failure: {
+              candidates: ["repo/src/file.ts"],
+              candidatesTruncated: true,
+            },
+          });
+        }),
+    );
+
+    it.effect("keeps ordinary reads strict when suggestions were not requested", () =>
+      Effect.gen(function* () {
+        const service = yield* WorkspaceFileSystem.WorkspaceFileSystem;
+        const cwd = yield* makeTempDir;
+        yield* writeTextFile(cwd, "repo/src/file.ts", "other");
+        const result = yield* service
+          .readFile({ cwd, relativePath: "src/file.ts" })
+          .pipe(Effect.result);
+        expect(result).toMatchObject({ failure: { _tag: "WorkspaceFileSystemOperationError" } });
+      }),
+    );
+
+    it.effect("matches the complete path suffix, including ignored repository files", () =>
+      Effect.gen(function* () {
+        const service = yield* WorkspaceFileSystem.WorkspaceFileSystem;
+        const cwd = yield* makeTempDir;
+        yield* writeTextFile(cwd, ".gitignore", "ignored-repo/\n");
+        yield* writeTextFile(cwd, "ignored-repo/src/file.ts", "wanted");
+        yield* writeTextFile(cwd, "repo/other/file.ts", "same name");
+        yield* writeTextFile(cwd, "repo/notsrc/file.ts", "partial segment");
+        yield* writeTextFile(cwd, "repo/src/file.ts.bak", "different extension");
+        const result = yield* service
+          .readFile({
+            cwd,
+            relativePath: "./src/file.ts",
+            suggestAlternatives: true,
+          })
+          .pipe(Effect.result);
+        expect(result).toMatchObject({
+          failure: {
+            candidates: ["ignored-repo/src/file.ts"],
+            candidatesTruncated: false,
+          },
+        });
+      }),
+    );
+
+    it.effect.each(["源 código/ação #100%.cs", ".env", "README", "src/MixedCase.ts"])(
+      "recovers the literal filename %s",
+      (relativePath) =>
+        Effect.gen(function* () {
+          const service = yield* WorkspaceFileSystem.WorkspaceFileSystem;
+          const cwd = yield* makeTempDir;
+          yield* writeTextFile(cwd, `repo/${relativePath}`, "file");
+          const result = yield* service
+            .readFile({ cwd, relativePath, suggestAlternatives: true })
+            .pipe(Effect.result);
+          expect(result).toMatchObject({
+            failure: {
+              candidates: [`repo/${relativePath}`],
+              candidatesTruncated: false,
+            },
+          });
+        }),
+    );
+
+    it.effect("offers no unrelated file or directory when no suffix matches", () =>
+      Effect.gen(function* () {
+        const service = yield* WorkspaceFileSystem.WorkspaceFileSystem;
+        const cwd = yield* makeTempDir;
+        const fs = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        yield* writeTextFile(cwd, "repo/src/FILE.ts", "case differs");
+        yield* fs.makeDirectory(path.join(cwd, "directory/src/file.ts"), { recursive: true });
+        const result = yield* service
+          .readFile({
+            cwd,
+            relativePath: "src/file.ts",
+            suggestAlternatives: true,
+          })
+          .pipe(Effect.result);
+        expect(result).toMatchObject({ failure: { candidates: [], candidatesTruncated: false } });
+      }),
+    );
+
+    it.effect("excludes dependency and Git internals from suggestions", () =>
+      Effect.gen(function* () {
+        const service = yield* WorkspaceFileSystem.WorkspaceFileSystem;
+        const cwd = yield* makeTempDir;
+        for (const prefix of [".git", "node_modules", "repo/.git", "repo/node_modules"]) {
+          yield* writeTextFile(cwd, `${prefix}/src/file.ts`, "internal");
+        }
+        yield* writeTextFile(cwd, "repo/src/file.ts", "source");
+        const result = yield* service
+          .readFile({
+            cwd,
+            relativePath: "src/file.ts",
+            suggestAlternatives: true,
+          })
+          .pipe(Effect.result);
+        expect(result).toMatchObject({
+          failure: {
+            candidates: ["repo/src/file.ts"],
+            candidatesTruncated: false,
+          },
+        });
+      }),
+    );
+
+    it.effect("never redirects an absolute missing host path or a parent-relative path", () =>
+      Effect.gen(function* () {
+        const service = yield* WorkspaceFileSystem.WorkspaceFileSystem;
+        const cwd = yield* makeTempDir;
+        const path = yield* Path.Path;
+        yield* writeTextFile(cwd, "repo/src/file.ts", "file");
+        const absolute = yield* service
+          .readFile({
+            cwd,
+            relativePath: path.join(cwd, "src/file.ts"),
+            suggestAlternatives: true,
+          })
+          .pipe(Effect.result);
+        expect(absolute).toMatchObject({ failure: { _tag: "WorkspaceFileSystemOperationError" } });
+        const traversal = yield* service
+          .readFile({
+            cwd,
+            relativePath: "../src/file.ts",
+            suggestAlternatives: true,
+          })
+          .pipe(Effect.result);
+        expect(traversal).toMatchObject({ failure: { _tag: "WorkspacePathOutsideRootError" } });
+        const explicitParent = yield* service
+          .readFile({
+            cwd,
+            relativePath: "repo/../src/file.ts",
+            suggestAlternatives: true,
+          })
+          .pipe(Effect.result);
+        expect(explicitParent).toMatchObject({
+          failure: { _tag: "WorkspaceFileSystemOperationError" },
+        });
+      }),
+    );
+
+    it.effect("keeps directory and binary failures instead of recovering another copy", () =>
+      Effect.gen(function* () {
+        const service = yield* WorkspaceFileSystem.WorkspaceFileSystem;
+        const cwd = yield* makeTempDir;
+        const fs = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        yield* fs.makeDirectory(path.join(cwd, "src/file.ts"), { recursive: true });
+        yield* writeTextFile(cwd, "repo/src/file.ts", "other");
+        expect(
+          yield* service
+            .readFile({
+              cwd,
+              relativePath: "src/file.ts",
+              suggestAlternatives: true,
+            })
+            .pipe(Effect.result),
+        ).toMatchObject({ failure: { _tag: "WorkspacePathNotFileError" } });
+        yield* writeTextFile(cwd, "binary.dat", "\0binary");
+        yield* writeTextFile(cwd, "repo/binary.dat", "text copy");
+        expect(
+          yield* service
+            .readFile({
+              cwd,
+              relativePath: "binary.dat",
+              suggestAlternatives: true,
+            })
+            .pipe(Effect.result),
+        ).toMatchObject({ failure: { _tag: "WorkspaceBinaryFileError" } });
+      }),
+    );
+
+    it.effect("bounds the number of candidates without claiming the search was complete", () =>
+      Effect.gen(function* () {
+        const service = yield* WorkspaceFileSystem.WorkspaceFileSystem;
+        const cwd = yield* makeTempDir;
+        for (let index = 0; index < 21; index++) {
+          yield* writeTextFile(cwd, `repo-${index}/src/file.ts`, "copy");
+        }
+        const result = yield* service
+          .readFile({
+            cwd,
+            relativePath: "src/file.ts",
+            suggestAlternatives: true,
+          })
+          .pipe(Effect.result);
+        expect(result).toMatchObject({
+          failure: {
+            _tag: "WorkspaceFileNotFoundError",
+            candidates: expect.any(Array),
+            candidatesTruncated: true,
+          },
+        });
+        if ("failure" in result && result.failure._tag === "WorkspaceFileNotFoundError") {
+          expect(result.failure.candidates).toHaveLength(20);
+        }
+      }),
+    );
+
+    it.effect("marks a directory-limited search as incomplete", () =>
+      Effect.gen(function* () {
+        const service = yield* WorkspaceFileSystem.WorkspaceFileSystem;
+        const cwd = yield* makeTempDir;
+        const fs = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        yield* Effect.forEach(
+          Array.from({ length: 513 }, (_, index) => index),
+          (index) => fs.makeDirectory(path.join(cwd, `directory-${index}`)),
+          { concurrency: 16 },
+        );
+        expect(
+          yield* service
+            .readFile({
+              cwd,
+              relativePath: "src/file.ts",
+              suggestAlternatives: true,
+            })
+            .pipe(Effect.result),
+        ).toMatchObject({ failure: { candidatesTruncated: true } });
+      }),
+    );
+
+    it.effect.skipIf(!symlinksSupported)(
+      "does not follow directory symlinks or suggest files outside the workspace",
+      () =>
+        Effect.gen(function* () {
+          const service = yield* WorkspaceFileSystem.WorkspaceFileSystem;
+          const cwd = yield* makeTempDir;
+          const outside = yield* makeTempDir;
+          const fs = yield* FileSystem.FileSystem;
+          const path = yield* Path.Path;
+          yield* writeTextFile(outside, "file.ts", "outside");
+          yield* fs.makeDirectory(path.join(cwd, "repo/src"), { recursive: true });
+          yield* fs.symlink(path.join(outside, "file.ts"), path.join(cwd, "repo/src/file.ts"));
+          const escaped = yield* service
+            .readFile({
+              cwd,
+              relativePath: "src/file.ts",
+              suggestAlternatives: true,
+            })
+            .pipe(Effect.result);
+          expect(escaped).toMatchObject({
+            failure: { candidates: [], candidatesTruncated: false },
+          });
+          yield* writeTextFile(cwd, "inside/src/file.ts", "inside");
+          yield* fs.symlink(cwd, path.join(cwd, "loop"));
+          expect(
+            yield* service
+              .readFile({
+                cwd,
+                relativePath: "src/file.ts",
+                suggestAlternatives: true,
+              })
+              .pipe(Effect.result),
+          ).toMatchObject({
+            failure: {
+              candidates: ["inside/src/file.ts"],
+              candidatesTruncated: true,
+            },
+          });
+        }),
+    );
+
+    it.effect("suggests a nested repository file without silently reading it", () =>
+      Effect.gen(function* () {
+        const service = yield* WorkspaceFileSystem.WorkspaceFileSystem;
+        const cwd = yield* makeTempDir;
+        yield* writeTextFile(cwd, "wssanvipark/WSSanviPark/ControleVersao.asmx.cs", "master");
+        const result = yield* service
+          .readFile({
+            cwd,
+            relativePath: "WSSanviPark/ControleVersao.asmx.cs",
+            suggestAlternatives: true,
+          })
+          .pipe(Effect.result);
+        expect(result).toMatchObject({
+          failure: {
+            _tag: "WorkspaceFileNotFoundError",
+            candidates: ["wssanvipark/WSSanviPark/ControleVersao.asmx.cs"],
+            candidatesTruncated: false,
+          },
+        });
+      }),
+    );
+
+    it.effect("keeps copies in different repositories ambiguous", () =>
+      Effect.gen(function* () {
+        const service = yield* WorkspaceFileSystem.WorkspaceFileSystem;
+        const cwd = yield* makeTempDir;
+        yield* writeTextFile(cwd, "repo/src/file.ts", "main");
+        yield* writeTextFile(cwd, "worktree/src/file.ts", "branch");
+        const result = yield* service
+          .readFile({
+            cwd,
+            relativePath: "src/file.ts",
+            suggestAlternatives: true,
+          })
+          .pipe(Effect.result);
+        expect(result).toMatchObject({
+          failure: {
+            _tag: "WorkspaceFileNotFoundError",
+            candidates: ["repo/src/file.ts", "worktree/src/file.ts"],
+            candidatesTruncated: false,
+          },
+        });
+      }),
+    );
+
+    it.effect("prioritizes the requested file over nested copies", () =>
+      Effect.gen(function* () {
+        const service = yield* WorkspaceFileSystem.WorkspaceFileSystem;
+        const cwd = yield* makeTempDir;
+        yield* writeTextFile(cwd, "src/file.ts", "requested");
+        yield* writeTextFile(cwd, "repo/src/file.ts", "other");
+        expect(
+          yield* service.readFile({
+            cwd,
+            relativePath: "src/file.ts",
+            suggestAlternatives: true,
+          }),
+        ).toMatchObject({ relativePath: "src/file.ts", contents: "requested" });
+      }),
+    );
+
     it.effect("reads UTF-8 files relative to the workspace root", () =>
       Effect.gen(function* () {
         const workspaceFileSystem = yield* WorkspaceFileSystem.WorkspaceFileSystem;
