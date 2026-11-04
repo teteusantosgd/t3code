@@ -31,11 +31,10 @@ import {
 } from "./tools.ts";
 
 /**
- * Terminal tools always act on the thread the MCP credential was minted for.
- * The thread id comes from the invocation scope and is never accepted as a tool
- * parameter, so an agent cannot name its way into another thread's terminals.
- * The credential must also grant `terminal`, which is only minted for
- * full-access sessions: these PTYs run outside the provider's sandbox.
+ * Terminal tools act only on the thread the MCP credential was minted for, so
+ * the thread id is never a tool parameter. The credential must also grant
+ * `terminal`, minted only for full-access sessions: these PTYs run outside the
+ * provider's sandbox.
  */
 const requireThreadId = Effect.fn("TerminalToolkit.requireThreadId")(function* () {
   const invocation = yield* McpInvocationContext.requireThreadMcpCapability("terminal");
@@ -57,12 +56,10 @@ const readThreadTerminals = Effect.fn("TerminalToolkit.readThreadTerminals")(fun
   return terminals.filter((terminal) => terminal.threadId === threadId);
 });
 
-/* eslint-disable no-control-regex -- stripping PTY escape sequences means matching them */
 const OSC_SEQUENCE = /\u001B\][\s\S]*?(?:\u0007|\u001B\\)/g;
 const CSI_SEQUENCE = /[\u001B\u009B]\[[0-?]*[ -/]*[@-~]/g;
 const SINGLE_ESCAPE = /\u001B[@-Z\\-_]/g;
 const RESIDUAL_CONTROL = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g;
-/* eslint-enable no-control-regex */
 
 /**
  * Turns raw PTY scrollback into something a model can read: drops escape
@@ -317,7 +314,7 @@ const requireTerminalWriteAccess = loadCaller().pipe(
   ),
 );
 
-export const terminalToolkitHandlers = {
+const terminalToolkitHandlers = {
   terminal_open: McpToolAccess.actsAsCaller((input) =>
     requireTerminalWriteAccess.pipe(
       Effect.andThen(() => terminalToolkitHandlerFunctions.terminal_open(input)),

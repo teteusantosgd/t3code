@@ -1,7 +1,6 @@
 import { useAtomValue } from "@effect/atom-react";
 import type { ThemeTypes } from "@pierre/diffs";
 import type { EnvironmentId } from "@t3tools/contracts";
-import { useMemo } from "react";
 
 import { displayPathForRepository } from "~/changesPanel.logic";
 import {
@@ -11,8 +10,8 @@ import {
   resolveFileDiffPath,
 } from "~/lib/diffRendering";
 import { PREFERRED_HIGHLIGHTER } from "~/lib/syntaxHighlighting";
-import type { VcsRepositoryTarget } from "~/lib/sourceControlActions";
-import { useVcsChangeActions } from "~/lib/sourceControlActions";
+import type { VcsRepositoryTarget } from "~/state/sourceControlActions";
+import { useVcsChangeActions } from "~/state/sourceControlActions";
 import { createRepositoryDiff } from "~/lib/repositoryDiff";
 import { useAtomCommand } from "~/state/use-atom-command";
 import { useEnvironmentQuery } from "~/state/query";
@@ -58,46 +57,35 @@ export function ChangesInlineDiff(props: {
   );
 
   const source = previewQuery.data?.sources.find((entry) => entry.kind === sourceKind) ?? null;
-  const workspaceDiff = useMemo(
-    () =>
-      source
-        ? createRepositoryDiff(
-            [
-              {
-                repository: {
-                  path: props.repositoryPath,
-                  name: props.repositoryPath,
-                  cwd: props.cwd,
-                  available: true,
-                },
-                source,
-              },
-            ],
-            props.environmentId,
-            getDiffFileContents,
-            props.theme,
-          )
-        : null,
-    [
-      source,
-      props.repositoryPath,
-      props.cwd,
-      props.environmentId,
-      getDiffFileContents,
-      props.theme,
-    ],
-  );
+  const workspaceDiff = source
+    ? createRepositoryDiff(
+        [
+          {
+            repository: {
+              path: props.repositoryPath,
+              name: props.repositoryPath,
+              cwd: props.cwd,
+              available: true,
+            },
+            source,
+          },
+        ],
+        props.environmentId,
+        getDiffFileContents,
+        props.theme,
+      )
+    : null;
 
-  const fileDiff = useMemo(() => {
+  const fileDiff = (() => {
     if (!workspaceDiff) return null;
     return (
       workspaceDiff.files.find((file) => resolveFileDiffPath(file) === displayPath) ??
       workspaceDiff.files[0] ??
       null
     );
-  }, [workspaceDiff, displayPath]);
+  })();
 
-  const items = useMemo(() => {
+  const items = (() => {
     if (!fileDiff) return [];
     return [
       {
@@ -108,7 +96,7 @@ export function ChangesInlineDiff(props: {
         version: buildFileDiffContentVersion(fileDiff),
       },
     ];
-  }, [fileDiff]);
+  })();
 
   return (
     <div className="mx-1 mb-1 overflow-hidden rounded-md border border-border/60 bg-background">

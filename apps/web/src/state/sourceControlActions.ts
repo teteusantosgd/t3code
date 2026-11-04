@@ -22,9 +22,7 @@ import {
   type VcsStashInput,
 } from "@t3tools/contracts";
 import * as Cause from "effect/Cause";
-import * as Option from "effect/Option";
 import { AsyncResult } from "effect/reactivity";
-import { useCallback } from "react";
 
 import { appAtomRegistry } from "../rpc/atomRegistry";
 import { gitEnvironment } from "./git";
@@ -33,6 +31,7 @@ import { readEnvironmentScope, useEnvironmentScope } from "./session";
 import { sourceControlEnvironment } from "./sourceControl";
 import { useAtomCommand } from "./use-atom-command";
 import { vcsActionManager, vcsEnvironment } from "./vcs";
+import { suggestAppAccessForRemote } from "../components/sourceControlAppAccessToast";
 
 export type SourceControlActionKind =
   | "init"
@@ -88,48 +87,45 @@ function useAction<
   const state = useAtomValue(vcsActionManager.stateAtom(input.scope));
   const ownsState = state.operation === operation;
 
-  const resetError = useCallback(() => {
+  const resetError = () => {
     vcsActionManager.resetError(appAtomRegistry, input.scope, operation);
-  }, [input.scope, operation]);
+  };
 
-  const run = useCallback(
-    async (...args: TArgs) => {
-      if (
-        input.scope.environmentId === null ||
-        !readEnvironmentScope(input.scope.environmentId, AuthSourceControlWriteScope)
-      ) {
-        return AsyncResult.failure<never, EnvironmentAuthorizationError>(
-          Cause.fail(
-            new EnvironmentAuthorizationError({
-              requiredScope: AuthSourceControlWriteScope,
-              message: "This connection cannot change source control.",
-            }),
-          ),
-        );
+  const run = async (...args: TArgs) => {
+    if (
+      input.scope.environmentId === null ||
+      !readEnvironmentScope(input.scope.environmentId, AuthSourceControlWriteScope)
+    ) {
+      return AsyncResult.failure<never, EnvironmentAuthorizationError>(
+        Cause.fail(
+          new EnvironmentAuthorizationError({
+            requiredScope: AuthSourceControlWriteScope,
+            message: "This connection cannot change source control.",
+          }),
+        ),
+      );
+    }
+    const execute = async (): Promise<
+      AtomCommandResult<AtomCommandSuccess<R>, AtomCommandFailure<R>>
+    > => {
+      const result = await input.action(...args);
+      if (AsyncResult.isSuccess(result)) {
+        input.onSuccess?.();
       }
-      const execute = async (): Promise<
-        AtomCommandResult<AtomCommandSuccess<R>, AtomCommandFailure<R>>
-      > => {
-        const result = await input.action(...args);
-        if (AsyncResult.isSuccess(result)) {
-          input.onSuccess?.();
-        }
-        return result as AtomCommandResult<AtomCommandSuccess<R>, AtomCommandFailure<R>>;
-      };
-      return input.managedExternally === true
-        ? execute()
-        : vcsActionManager.track(
-            appAtomRegistry,
-            input.scope,
-            {
-              operation,
-              label: input.label,
-            },
-            execute,
-          );
-    },
-    [input.action, input.label, input.managedExternally, input.onSuccess, input.scope, operation],
-  );
+      return result as AtomCommandResult<AtomCommandSuccess<R>, AtomCommandFailure<R>>;
+    };
+    return input.managedExternally === true
+      ? execute()
+      : vcsActionManager.track(
+          appAtomRegistry,
+          input.scope,
+          {
+            operation,
+            label: input.label,
+          },
+          execute,
+        );
+  };
 
   return {
     isAllowed,
@@ -164,7 +160,7 @@ export function useSourceControlActionRunning(
 
 export function useVcsInitAction(scope: SourceControlActionScope) {
   const init = useAtomCommand(vcsEnvironment.init, { reportFailure: false });
-  const action = useCallback(async () => {
+  const action = async () => {
     const target = resolveScope(scope);
     if (target === null) {
       return AsyncResult.failure<never, VcsActionUnavailableError>(
@@ -181,7 +177,7 @@ export function useVcsInitAction(scope: SourceControlActionScope) {
       environmentId: target.environmentId,
       input: { cwd: target.cwd },
     });
-  }, [init, scope]);
+  };
   return useAction({ kind: "init", label: "Initializing repository", scope, action });
 }
 
@@ -195,7 +191,7 @@ export function useVcsPullAction(scope: SourceControlActionScope) {
         })
       : null,
   );
-  const action = useCallback(async () => {
+  const action = async () => {
     const target = resolveScope(scope);
     if (target === null) {
       return AsyncResult.failure<never, VcsActionUnavailableError>(
@@ -212,7 +208,7 @@ export function useVcsPullAction(scope: SourceControlActionScope) {
       environmentId: target.environmentId,
       input: { cwd: target.cwd },
     });
-  }, [pull, scope]);
+  };
   return useAction({
     kind: "pull",
     label: "Pulling latest changes...",
@@ -235,23 +231,20 @@ export function useGitStackedAction(scope: SourceControlActionScope) {
       : null,
   );
 
-  const action = useCallback(
-    async (input: RunVcsStackedActionInput) => {
-      if (resolveScope(scope) === null) {
-        return AsyncResult.failure<never, VcsActionUnavailableError>(
-          Cause.fail(
-            new VcsActionUnavailableError({
-              operation: "run_change_request",
-              environmentId: scope.environmentId,
-              cwd: scope.cwd,
-            }),
-          ),
-        );
-      }
-      return runStackedAction(input);
-    },
-    [runStackedAction, scope],
-  );
+  const action = async (input: RunVcsStackedActionInput) => {
+    if (resolveScope(scope) === null) {
+      return AsyncResult.failure<never, VcsActionUnavailableError>(
+        Cause.fail(
+          new VcsActionUnavailableError({
+            operation: "run_change_request",
+            environmentId: scope.environmentId,
+            cwd: scope.cwd,
+          }),
+        ),
+      );
+    }
+    return runStackedAction(input);
+  };
 
   return useAction({
     kind: "runStackedAction",
@@ -275,36 +268,37 @@ export function useSourceControlPublishRepositoryAction(scope: SourceControlActi
         })
       : null,
   );
-  const action = useCallback(
-    async (input: {
-      provider: SourceControlProviderKind;
-      repository: string;
-      visibility: SourceControlRepositoryVisibility;
-      remoteName: string;
-      protocol: SourceControlCloneProtocol;
-    }) => {
-      const target = resolveScope(scope);
-      if (target === null) {
-        return AsyncResult.failure<never, VcsActionUnavailableError>(
-          Cause.fail(
-            new VcsActionUnavailableError({
-              operation: "publish_repository",
-              environmentId: scope.environmentId,
-              cwd: scope.cwd,
-            }),
-          ),
-        );
-      }
-      return publishRepository({
-        environmentId: target.environmentId,
-        input: {
-          cwd: target.cwd,
-          ...input,
-        },
-      });
-    },
-    [publishRepository, scope],
-  );
+  const action = async (input: {
+    provider: SourceControlProviderKind;
+    repository: string;
+    visibility: SourceControlRepositoryVisibility;
+    remoteName: string;
+    protocol: SourceControlCloneProtocol;
+  }) => {
+    const target = resolveScope(scope);
+    if (target === null) {
+      return AsyncResult.failure<never, VcsActionUnavailableError>(
+        Cause.fail(
+          new VcsActionUnavailableError({
+            operation: "publish_repository",
+            environmentId: scope.environmentId,
+            cwd: scope.cwd,
+          }),
+        ),
+      );
+    }
+    const result = await publishRepository({
+      environmentId: target.environmentId,
+      input: {
+        cwd: target.cwd,
+        ...input,
+      },
+    });
+    if (result._tag === "Success") {
+      void suggestAppAccessForRemote(target.environmentId, result.value.remoteUrl);
+    }
+    return result;
+  };
   return useAction({
     kind: "publishRepository",
     label: "Publishing repository",
@@ -318,46 +312,47 @@ export function usePreparePullRequestThreadAction(scope: SourceControlActionScop
   const preparePullRequestThread = useAtomCommand(gitEnvironment.preparePullRequestThread, {
     reportFailure: false,
   });
-  const action = useCallback(
-    async (input: { reference: string; mode: "local" | "worktree"; threadId?: ThreadId }) => {
-      const target = resolveScope(scope);
-      if (target === null) {
-        return AsyncResult.failure<never, VcsActionUnavailableError>(
-          Cause.fail(
-            new VcsActionUnavailableError({
-              operation: "prepare_pull_request_thread",
-              environmentId: scope.environmentId,
-              cwd: scope.cwd,
-            }),
-          ),
-        );
-      }
-      if (
-        input.mode === "worktree" &&
-        input.threadId !== undefined &&
-        !readEnvironmentScope(target.environmentId, AuthOrchestrationOperateScope)
-      ) {
-        return AsyncResult.failure<never, EnvironmentAuthorizationError>(
-          Cause.fail(
-            new EnvironmentAuthorizationError({
-              requiredScope: AuthOrchestrationOperateScope,
-              message: "This connection cannot change threads.",
-            }),
-          ),
-        );
-      }
-      return preparePullRequestThread({
-        environmentId: target.environmentId,
-        input: {
-          cwd: target.cwd,
-          reference: input.reference,
-          mode: input.mode,
-          ...(input.threadId ? { threadId: input.threadId } : {}),
-        },
-      });
-    },
-    [preparePullRequestThread, scope],
-  );
+  const action = async (input: {
+    reference: string;
+    mode: "local" | "worktree";
+    threadId?: ThreadId;
+  }) => {
+    const target = resolveScope(scope);
+    if (target === null) {
+      return AsyncResult.failure<never, VcsActionUnavailableError>(
+        Cause.fail(
+          new VcsActionUnavailableError({
+            operation: "prepare_pull_request_thread",
+            environmentId: scope.environmentId,
+            cwd: scope.cwd,
+          }),
+        ),
+      );
+    }
+    if (
+      input.mode === "worktree" &&
+      input.threadId !== undefined &&
+      !readEnvironmentScope(target.environmentId, AuthOrchestrationOperateScope)
+    ) {
+      return AsyncResult.failure<never, EnvironmentAuthorizationError>(
+        Cause.fail(
+          new EnvironmentAuthorizationError({
+            requiredScope: AuthOrchestrationOperateScope,
+            message: "This connection cannot change threads.",
+          }),
+        ),
+      );
+    }
+    return preparePullRequestThread({
+      environmentId: target.environmentId,
+      input: {
+        cwd: target.cwd,
+        reference: input.reference,
+        mode: input.mode,
+        ...(input.threadId ? { threadId: input.threadId } : {}),
+      },
+    });
+  };
   return useAction({
     kind: "preparePullRequestThread",
     label: "Preparing pull request thread",
@@ -378,15 +373,14 @@ export function readCachedPullRequestResolution(
   if (target.environmentId === null || target.cwd === null || target.reference === null) {
     return null;
   }
-  return Option.getOrNull(
-    AsyncResult.value(
-      appAtomRegistry.get(
-        gitEnvironment.pullRequestResolution({
-          environmentId: target.environmentId,
-          input: { cwd: target.cwd, reference: target.reference },
-        }),
-      ),
+  return AsyncResult.getOrElse(
+    appAtomRegistry.get(
+      gitEnvironment.pullRequestResolution({
+        environmentId: target.environmentId,
+        input: { cwd: target.cwd, reference: target.reference },
+      }),
     ),
+    () => null,
   );
 }
 
@@ -419,15 +413,10 @@ export interface VcsRepositoryTarget {
 }
 
 /**
- * Source Control mutations for a surface that spans several checkouts: the
- * repository travels with each call, so one hook instance serves every
- * repository a panel renders. Each mutation asks the server to recompute the
- * status it just invalidated, because the index changed underneath the
- * subscription rather than the working tree.
- *
- * Long-running actions (commit, pull, publish) belong in the scope-based hooks
- * above: they take over the shared source-control action state that the branch
- * toolbar renders, while staging a file is not an action a user waits on.
+ * Source Control mutations that take the repository per call, so one instance
+ * serves every checkout a panel renders. Each one refreshes status afterwards
+ * because the index changed under the subscription. Long-running actions
+ * (commit, pull, publish) stay in the scope-based hooks above.
  */
 export function useVcsChangeActions() {
   const refreshStatus = useAtomCommand(vcsEnvironment.refreshStatus, { reportFailure: false });
@@ -439,122 +428,68 @@ export function useVcsChangeActions() {
   const push = useAtomCommand(vcsEnvironment.push);
   const sync = useAtomCommand(vcsEnvironment.sync);
 
-  const settle = useCallback(
-    async <R extends AtomCommandResult<unknown, unknown>>(
-      target: VcsRepositoryTarget,
-      run: () => Promise<R>,
-    ) => {
-      const result = await run();
-      void refreshStatus({
-        environmentId: target.environmentId,
-        input: { cwd: target.cwd },
-      });
-      return result;
-    },
-    [refreshStatus],
-  );
+  const settle = async <R extends AtomCommandResult<unknown, unknown>>(
+    target: VcsRepositoryTarget,
+    run: () => Promise<R>,
+  ) => {
+    const result = await run();
+    void refreshStatus({
+      environmentId: target.environmentId,
+      input: { cwd: target.cwd },
+    });
+    return result;
+  };
+  const paths =
+    (action: "stage" | "unstage" | "discard") =>
+    (target: VcsRepositoryTarget, filePaths: ReadonlyArray<string>) =>
+      settle(target, () =>
+        updatePaths({
+          environmentId: target.environmentId,
+          input: { cwd: target.cwd, action, paths: filePaths },
+        }),
+      );
+  const hunk =
+    (action: "stage" | "unstage" | "discard") =>
+    (target: VcsRepositoryTarget, input: { path: string; patch: string }) =>
+      settle(target, () =>
+        updateHunk({
+          environmentId: target.environmentId,
+          input: { cwd: target.cwd, action, ...input },
+        }),
+      );
 
   return {
-    stagePaths: useCallback(
-      (target: VcsRepositoryTarget, paths: ReadonlyArray<string>) =>
-        settle(target, () =>
-          updatePaths({
-            environmentId: target.environmentId,
-            input: { cwd: target.cwd, action: "stage", paths },
-          }),
-        ),
-      [settle, updatePaths],
-    ),
-    unstagePaths: useCallback(
-      (target: VcsRepositoryTarget, paths: ReadonlyArray<string>) =>
-        settle(target, () =>
-          updatePaths({
-            environmentId: target.environmentId,
-            input: { cwd: target.cwd, action: "unstage", paths },
-          }),
-        ),
-      [settle, updatePaths],
-    ),
-    discardPaths: useCallback(
-      (target: VcsRepositoryTarget, paths: ReadonlyArray<string>) =>
-        settle(target, () =>
-          updatePaths({
-            environmentId: target.environmentId,
-            input: { cwd: target.cwd, action: "discard", paths },
-          }),
-        ),
-      [settle, updatePaths],
-    ),
-    stageHunk: useCallback(
-      (target: VcsRepositoryTarget, hunk: { path: string; patch: string }) =>
-        settle(target, () =>
-          updateHunk({
-            environmentId: target.environmentId,
-            input: { cwd: target.cwd, action: "stage", ...hunk },
-          }),
-        ),
-      [settle, updateHunk],
-    ),
-    unstageHunk: useCallback(
-      (target: VcsRepositoryTarget, hunk: { path: string; patch: string }) =>
-        settle(target, () =>
-          updateHunk({
-            environmentId: target.environmentId,
-            input: { cwd: target.cwd, action: "unstage", ...hunk },
-          }),
-        ),
-      [settle, updateHunk],
-    ),
-    discardHunk: useCallback(
-      (target: VcsRepositoryTarget, hunk: { path: string; patch: string }) =>
-        settle(target, () =>
-          updateHunk({
-            environmentId: target.environmentId,
-            input: { cwd: target.cwd, action: "discard", ...hunk },
-          }),
-        ),
-      [settle, updateHunk],
-    ),
-    stash: useCallback(
-      (target: VcsRepositoryTarget, input: Omit<VcsStashInput, "cwd">) =>
-        settle(target, () =>
-          stash({ environmentId: target.environmentId, input: { cwd: target.cwd, ...input } }),
-        ),
-      [settle, stash],
-    ),
-    amendCommit: useCallback(
-      (target: VcsRepositoryTarget, commitMessage?: string) =>
-        settle(target, () =>
-          amendCommit({
-            environmentId: target.environmentId,
-            input: {
-              cwd: target.cwd,
-              ...(commitMessage?.trim() ? { commitMessage: commitMessage.trim() } : {}),
-            },
-          }),
-        ),
-      [settle, amendCommit],
-    ),
-    undoLastCommit: useCallback(
-      (target: VcsRepositoryTarget) =>
-        settle(target, () =>
-          undoLastCommit({ environmentId: target.environmentId, input: { cwd: target.cwd } }),
-        ),
-      [settle, undoLastCommit],
-    ),
-    push: useCallback(
-      (target: VcsRepositoryTarget) =>
-        settle(target, () =>
-          push({ environmentId: target.environmentId, input: { cwd: target.cwd } }),
-        ),
-      [settle, push],
-    ),
-    sync: useCallback(
-      (target: VcsRepositoryTarget) =>
-        settle(target, () =>
-          sync({ environmentId: target.environmentId, input: { cwd: target.cwd } }),
-        ),
-      [settle, sync],
-    ),
+    stagePaths: paths("stage"),
+    unstagePaths: paths("unstage"),
+    discardPaths: paths("discard"),
+    stageHunk: hunk("stage"),
+    unstageHunk: hunk("unstage"),
+    discardHunk: hunk("discard"),
+    stash: (target: VcsRepositoryTarget, input: Omit<VcsStashInput, "cwd">) =>
+      settle(target, () =>
+        stash({ environmentId: target.environmentId, input: { cwd: target.cwd, ...input } }),
+      ),
+    amendCommit: (target: VcsRepositoryTarget, commitMessage?: string) =>
+      settle(target, () =>
+        amendCommit({
+          environmentId: target.environmentId,
+          input: {
+            cwd: target.cwd,
+            ...(commitMessage?.trim() ? { commitMessage: commitMessage.trim() } : {}),
+          },
+        }),
+      ),
+    undoLastCommit: (target: VcsRepositoryTarget) =>
+      settle(target, () =>
+        undoLastCommit({ environmentId: target.environmentId, input: { cwd: target.cwd } }),
+      ),
+    push: (target: VcsRepositoryTarget) =>
+      settle(target, () =>
+        push({ environmentId: target.environmentId, input: { cwd: target.cwd } }),
+      ),
+    sync: (target: VcsRepositoryTarget) =>
+      settle(target, () =>
+        sync({ environmentId: target.environmentId, input: { cwd: target.cwd } }),
+      ),
   };
 }

@@ -2,12 +2,10 @@
 import type { ProviderVoiceSessionEvent, ProviderVoiceTranscriptRole } from "@t3tools/contracts";
 
 /**
- * Voice conversations (Codex realtime voice). The client owns the microphone,
- * speaker, and WebRTC peer; the environment only relays the SDP handshake and
- * captions over `provider.voice.session`. Audio never crosses the T3 socket,
- * so voice works the same locally, over a relay, or through a tunnel.
- *
- * The WebRTC surface is structural so browsers and react-native-webrtc both fit.
+ * Codex realtime voice. The client owns the microphone, speaker, and WebRTC
+ * peer; the environment only relays SDP and captions over
+ * `provider.voice.session`, so audio never crosses the T3 socket. The WebRTC
+ * surface is structural so browsers and react-native-webrtc both fit.
  */
 
 export interface VoiceMediaTrack {

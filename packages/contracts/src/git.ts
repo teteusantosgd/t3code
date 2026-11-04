@@ -1,6 +1,7 @@
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import {
+  ForwardCompatibleOptional,
   NonNegativeInt,
   PositiveInt,
   ProjectId,
@@ -13,8 +14,6 @@ import { VcsDriverKind } from "./vcs.ts";
 const TrimmedNonEmptyStringSchema = TrimmedNonEmptyString;
 const GitFilePath = Schema.String.check(Schema.isNonEmpty());
 const GIT_LIST_BRANCHES_MAX_LIMIT = 200;
-
-// Domain Types
 
 export const GitStackedAction = Schema.Literals([
   "commit",
@@ -85,6 +84,8 @@ export const VcsRef = Schema.Struct({
   name: TrimmedNonEmptyStringSchema,
   isRemote: Schema.optional(Schema.Boolean),
   remoteName: Schema.optional(TrimmedNonEmptyStringSchema),
+  // Full Git ref, for example refs/remotes/origin/feature.
+  upstreamRef: Schema.optional(TrimmedNonEmptyStringSchema),
   current: Schema.Boolean,
   isDefault: Schema.Boolean,
   worktreePath: TrimmedNonEmptyStringSchema.pipe(Schema.NullOr),
@@ -104,8 +105,6 @@ const GitResolvedPullRequest = Schema.Struct({
   state: GitPullRequestState,
 });
 export type GitResolvedPullRequest = typeof GitResolvedPullRequest.Type;
-
-// RPC Inputs
 
 export const GitGenerateCommitMessageInput = Schema.Struct({
   cwd: TrimmedNonEmptyStringSchema,
@@ -264,7 +263,6 @@ export const GitRunStackedActionInput = Schema.Struct({
   featureBranch: Schema.optional(Schema.Boolean),
   filePaths: Schema.optional(Schema.Array(GitFilePath).check(Schema.isMinLength(1))),
   commitScope: Schema.optional(GitCommitScope),
-  /** The thread the action runs beside; a pull request it creates is linked to it. */
   threadId: Schema.optional(ThreadId),
   projectId: Schema.optional(ProjectId),
 });
@@ -337,8 +335,6 @@ export const VcsInitInput = Schema.Struct({
 });
 export type VcsInitInput = typeof VcsInitInput.Type;
 
-// RPC Results
-
 const VcsStatusChangeRequest = Schema.Struct({
   number: PositiveInt,
   title: TrimmedNonEmptyStringSchema,
@@ -346,13 +342,7 @@ const VcsStatusChangeRequest = Schema.Struct({
   baseRef: TrimmedNonEmptyStringSchema,
   headRef: TrimmedNonEmptyStringSchema,
   state: VcsStatusChangeRequestState,
-  /** Optional for compatibility with older servers and providers. */
   isDraft: Schema.optional(Schema.Boolean),
-  /**
-   * Last provider-side activity (ISO), including comments and metadata edits.
-   * This is not the time a change request closed or merged. Optional for old
-   * servers and providers whose lookups do not report it.
-   */
   updatedAt: Schema.optional(Schema.NullOr(Schema.String)),
 });
 
@@ -365,6 +355,9 @@ const VcsStatusLocalShape = {
   hasWorkingTreeChanges: Schema.Boolean,
   /** Combined working-tree changes vs HEAD (legacy / commit dialog). */
   workingTree: Schema.Struct({
+    // Absolute worktree root on the environment that every files[].path is
+    // relative to. Absent when the server could not resolve it.
+    rootPath: Schema.optional(GitFilePath),
     files: Schema.Array(
       Schema.Struct({
         path: GitFilePath,
@@ -375,10 +368,6 @@ const VcsStatusLocalShape = {
     insertions: NonNegativeInt,
     deletions: NonNegativeInt,
   }),
-  /**
-   * Totals for the diff panel's Changes view: merge-base with the base branch to the
-   * working tree, untracked files included. Absent on older servers.
-   */
   branchChanges: Schema.optional(
     Schema.Struct({
       baseRef: Schema.NullOr(TrimmedNonEmptyStringSchema),
@@ -427,6 +416,7 @@ export const VcsStatusStreamEvent = Schema.Union([
 export type VcsStatusStreamEvent = typeof VcsStatusStreamEvent.Type;
 
 export const VcsListRefsResult = Schema.Struct({
+  isAtRepositoryRoot: Schema.optional(Schema.Boolean),
   refs: Schema.Array(VcsRef),
   isRepo: Schema.Boolean,
   hasPrimaryRemote: Schema.Boolean,
@@ -449,11 +439,7 @@ export const GitPreparePullRequestThreadResult = Schema.Struct({
   pullRequest: GitResolvedPullRequest,
   branch: TrimmedNonEmptyStringSchema,
   worktreePath: TrimmedNonEmptyStringSchema.pipe(Schema.NullOr),
-  /**
-   * False when the checkout could not be brought to the pull request head — a reused worktree
-   * holding local commits or uncommitted changes keeps its own state, so the code being handed
-   * over is older than the pull request.
-   */
+  /** False when local commits or edits prevented a reused worktree from reaching the PR head. */
   isOnPullRequestHead: Schema.Boolean.pipe(Schema.withDecodingDefaultKey(Effect.succeed(true))),
 });
 export type GitPreparePullRequestThreadResult = typeof GitPreparePullRequestThreadResult.Type;
@@ -505,19 +491,20 @@ export const VcsSyncResult = Schema.Struct({
 });
 export type VcsSyncResult = typeof VcsSyncResult.Type;
 
-// RPC / domain errors
-
-// Well-known git failures, recognized from stderr at the driver and carried as
-// a closed set of diagnostic tags. Git's stderr itself stays off the error: it
-// echoes argv and remote URLs, which can hold credentials. The tag names the
-// cause for logs and callers; it does not select a message.
+// Git stderr can echo credentials from argv and remote URLs. Only a fixed
+// reason reaches the error and its diagnostic suffix; newer, unknown reasons
+// decode as absent through GitCommandError.
 export const GitCommandFailureReason = Schema.Literals([
   "authentication_failed",
   "branch_already_exists",
   "branch_checked_out_in_worktree",
+  "config_locked",
   "host_key_unverified",
   "not_a_repository",
   "path_already_exists",
+  "push_rejected_by_remote",
+  "push_rejected_non_fast_forward",
+  "ref_not_found",
   "remote_unreachable",
   "tag_would_be_clobbered",
 ]);
@@ -532,7 +519,7 @@ export class GitCommandError extends Schema.TaggedError<GitCommandError>()("GitC
   stdoutLength: Schema.optional(Schema.Number),
   stderrLength: Schema.optional(Schema.Number),
   outputLength: Schema.optional(Schema.Number),
-  reason: Schema.optional(GitCommandFailureReason),
+  reason: ForwardCompatibleOptional(GitCommandFailureReason),
   detail: Schema.String,
   cause: Schema.optional(Schema.Defect()),
 }) {

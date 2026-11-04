@@ -49,19 +49,6 @@ export function changesExpandedFileKey(input: {
   return `${input.cwd}\0${input.scope}\0${input.path}`;
 }
 
-export function repositoryScopedFilePath(repositoryPath: string, displayPath: string): string {
-  const normalizedRepositoryPath = repositoryPath.replaceAll("\\", "/");
-  const normalizedDisplayPath = displayPath.replaceAll("\\", "/");
-  const prefix =
-    normalizedRepositoryPath === "" || normalizedRepositoryPath === "."
-      ? ""
-      : `${normalizedRepositoryPath.replace(/\/+$/, "")}/`;
-  if (!prefix) return normalizedDisplayPath;
-  return normalizedDisplayPath.startsWith(prefix)
-    ? normalizedDisplayPath.slice(prefix.length)
-    : normalizedDisplayPath;
-}
-
 export function vcsFileStatusToTreeStatus(status: VcsFileChangeStatus): GitStatus {
   switch (status) {
     case "A":

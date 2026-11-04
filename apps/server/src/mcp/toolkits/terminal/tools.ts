@@ -225,7 +225,7 @@ const readonlyShellTool = <T extends Tool.Any>(tool: T): T =>
     .annotate(Tool.Readonly, true)
     .annotate(Tool.Idempotent, true) as T;
 
-export const TerminalOpenTool = shellTool(
+const TerminalOpenTool = shellTool(
   Tool.make("terminal_open", {
     description:
       "Open a persistent shell in this thread's terminal panel, where the user can watch and take over. The panel opens on the user's screen with the new terminal focused. Use this, not your own shell or exec tool, whenever you start something that keeps running: dev servers, APIs, watchers, workers, or anything the user wants to follow. Reattaches when terminalId names one of your existing agent-N terminals, otherwise spawns a new PTY in cwd. Pass worktreePath when cwd is inside a git worktree you created.",
@@ -238,7 +238,7 @@ export const TerminalOpenTool = shellTool(
     .annotate(Tool.Destructive, false),
 );
 
-export const TerminalWriteTool = shellTool(
+const TerminalWriteTool = shellTool(
   Tool.make("terminal_write", {
     description:
       "Send input to one of your agent-N terminals; the user's own terminals reject input. This is how to start servers, APIs, and watchers where the user can see them; never start those in your own shell's background. By default the input is submitted: a carriage return is appended unless data already ends in a newline, so pass the bare command such as 'pnpm test'. Set submit=false to send raw keystrokes without running them. Writing does not wait for the command; follow with terminal_wait and terminal_read.",
@@ -249,7 +249,7 @@ export const TerminalWriteTool = shellTool(
   }).annotate(Tool.Title, "Write to terminal"),
 );
 
-export const TerminalReadTool = readonlyShellTool(
+const TerminalReadTool = readonlyShellTool(
   Tool.make("terminal_read", {
     description: `Read the tail of a terminal's scrollback. Returns at most ${TERMINAL_READ_DEFAULT_LINES} trailing lines by default and never more than ${TERMINAL_READ_MAX_CHARACTERS} characters, keeping the newest output and setting truncated when anything was dropped. Escape sequences are stripped unless stripAnsi=false.`,
     parameters: TerminalReadToolInput,
@@ -259,7 +259,7 @@ export const TerminalReadTool = readonlyShellTool(
   }).annotate(Tool.Title, "Read terminal output"),
 );
 
-export const TerminalListTool = readonlyShellTool(
+const TerminalListTool = readonlyShellTool(
   Tool.make("terminal_list", {
     description:
       "List the live terminals for this thread with their label, status, working directory, worktree, and whether a subprocess is still running. agent-N terminals are yours; term-N terminals are the user's and are read-only to you. Use it to find an existing terminal before opening another one.",
@@ -270,7 +270,7 @@ export const TerminalListTool = readonlyShellTool(
   }).annotate(Tool.Title, "List terminals"),
 );
 
-export const TerminalWaitTool = readonlyShellTool(
+const TerminalWaitTool = readonlyShellTool(
   Tool.make("terminal_wait", {
     description: `Block until a terminal has reported no running subprocess for quietMs, or until timeoutMs elapses. Returns idle=true when the command finished and timedOut=true when it is still running, and always returns within timeoutMs (default ${TERMINAL_WAIT_DEFAULT_TIMEOUT_MS} ms).`,
     parameters: TerminalWaitToolInput,
@@ -280,7 +280,7 @@ export const TerminalWaitTool = readonlyShellTool(
   }).annotate(Tool.Title, "Wait for terminal to go idle"),
 );
 
-export const TerminalCloseTool = shellTool(
+const TerminalCloseTool = shellTool(
   Tool.make("terminal_close", {
     description:
       "Close one of your agent-N terminals and kill its shell. Idempotent: closed=false means no live terminal had that id. Set deleteHistory=true to also drop the persisted scrollback.",

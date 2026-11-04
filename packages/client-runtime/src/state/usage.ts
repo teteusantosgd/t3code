@@ -1,4 +1,4 @@
-import type { EnvironmentId, UsageSummaryInput } from "@t3tools/contracts";
+import type { EnvironmentId, UsageModelFilter, UsageSummaryInput } from "@t3tools/contracts";
 import * as Schema from "effect/Schema";
 import type { AtomRegistry } from "effect/reactivity";
 
@@ -9,6 +9,13 @@ import type { createServerEnvironmentAtoms } from "./server.ts";
 
 const isEnvironmentRpcUnavailable = Schema.is(EnvironmentRpcUnavailableError);
 
+/** The Usage tab asks each environment with that environment's configured model filter. */
+export function usageSummaryInput(
+  input: UsageSummaryInput,
+  modelFilter: UsageModelFilter | undefined,
+): UsageSummaryInput {
+  return modelFilter === undefined ? input : { ...input, modelFilter };
+}
 const limitsRefreshAfter = new Map<EnvironmentId, number>();
 const limitsRefreshes = new Map<EnvironmentId, Promise<unknown>>();
 
@@ -23,12 +30,9 @@ export async function refreshUsageLimits<A>(
     if (afterPending) {
       try {
         await pending;
-      } catch {
-        // The new check still needs to run if the earlier one failed.
-      }
+      } catch {}
       return refreshUsageLimits(environmentId, refresh, false, true);
     }
-    // Manual refresh waits for the current check; automatic refresh does not repeat it.
     return automatic ? undefined : ((await pending) as A);
   }
   const refreshAfter = limitsRefreshAfter.get(environmentId) ?? 0;
@@ -45,7 +49,6 @@ export async function refreshUsageLimits<A>(
   return await current;
 }
 
-/** Refresh pricing, then await each selected environment's rescan while it remains connected. */
 export async function refreshUsage({
   registry,
   server,
@@ -56,7 +59,7 @@ export async function refreshUsage({
   registry: AtomRegistry.AtomRegistry;
   server: Pick<
     ReturnType<typeof createServerEnvironmentAtoms>,
-    "usageSummary" | "refreshUsageRates"
+    "usageSummary" | "refreshUsageRates" | "usageModelFilterAtom"
   >;
   presentations: Pick<ReturnType<typeof createEnvironmentPresentationAtoms>, "presentationAtom">;
   environmentIds: readonly EnvironmentId[];
@@ -64,7 +67,10 @@ export async function refreshUsage({
 }): Promise<void> {
   await Promise.all(
     environmentIds.map(async (environmentId) => {
-      const query = server.usageSummary({ environmentId, input });
+      const query = server.usageSummary({
+        environmentId,
+        input: usageSummaryInput(input, registry.get(server.usageModelFilterAtom(environmentId))),
+      });
       const presentation = presentations.presentationAtom(environmentId);
       const controller = new AbortController();
       const abortWhenDisconnected = () => {
@@ -82,7 +88,6 @@ export async function refreshUsage({
         const sessionUnavailable =
           ratesResult._tag === "Failure" &&
           isEnvironmentRpcUnavailable(squashAtomCommandFailure(ratesResult));
-        // Invalidate even on failure so reconnects cannot reuse the old summary.
         registry.refresh(query);
         if (sessionUnavailable || controller.signal.aborted) return;
         await executeAtomQuery(registry, query, {

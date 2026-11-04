@@ -31,7 +31,8 @@ import type { RpcSession } from "../rpc/session.ts";
 import * as ShellSnapshotLoader from "./shellSnapshotHttp.ts";
 import type { DeferredShellSnapshot } from "./shellPullRequests.ts";
 import {
-  applyShellStreamEvent,
+  applyShellStreamEvents,
+  type ShellStreamEvent,
   mergeShellSnapshotProjects,
   reuseUnchangedThreadShells,
   sameThreadPullRequests,
@@ -45,12 +46,26 @@ export interface EnvironmentShellState {
   readonly snapshot: Option.Option<OrchestrationV2ShellSnapshot>;
   readonly status: EnvironmentShellStatus;
   readonly error: Option.Option<string>;
+  /**
+   * Changes with each authoritative snapshot (not enrichment refreshes); 0 until the first one.
+   * Thread families read for an older generation may miss changes from before the latest snapshot,
+   * so they are read again.
+   */
+  readonly generation: number;
+  /** Sequences of the thread removals applied since the latest authoritative snapshot. */
+  readonly removedAt: ReadonlyMap<ThreadId, number>;
 }
 
-const EMPTY_SHELL_STATE: EnvironmentShellState = {
+const EMPTY_REMOVALS: ReadonlyMap<ThreadId, number> = new Map();
+// Shared by every shell state, so a rebuilt one never reuses a generation another already used.
+let lastShellGeneration = 0;
+
+export const EMPTY_SHELL_STATE: EnvironmentShellState = {
   snapshot: Option.none(),
   status: "empty",
   error: Option.none(),
+  generation: 0,
+  removedAt: EMPTY_REMOVALS,
 };
 
 function shellStatusForSnapshot(
@@ -86,9 +101,9 @@ export const makeEnvironmentShellState = Effect.fn("EnvironmentShellState.make")
   );
   const cachedSnapshot = Option.map(cached, withoutDeferredPullRequests);
   const state = yield* SubscriptionRef.make<EnvironmentShellState>({
+    ...EMPTY_SHELL_STATE,
     snapshot: cachedSnapshot,
     status: shellStatusForSnapshot(cachedSnapshot),
-    error: Option.none(),
   });
   const awaitingCompletion = yield* Ref.make(false);
   const lastAuthoritativeSession = yield* Ref.make<RpcSession | null>(null);
@@ -111,6 +126,19 @@ export const makeEnvironmentShellState = Effect.fn("EnvironmentShellState.make")
       if (Option.isNone(latest) || latest.value === lastPersisted) return;
       if (latest.value.threads.some((thread) => pendingLinkRows.has(thread))) return;
       const snapshot = latest.value;
+      if (
+        lastPersisted !== undefined &&
+        snapshot.snapshotSequence >= lastPersisted.snapshotSequence &&
+        snapshot.schemaVersion === lastPersisted.schemaVersion &&
+        snapshot.projects === lastPersisted.projects &&
+        snapshot.threads === lastPersisted.threads &&
+        snapshot.archivedThreads === lastPersisted.archivedThreads
+      ) {
+        // Keep the live cursor without rewriting the rows. Remember it here too so a
+        // later authoritative reset to a lower sequence still reaches the cache.
+        lastPersisted = snapshot;
+        return;
+      }
       const saved = yield* cache.saveShell(environmentId, snapshot).pipe(
         Effect.as(true),
         Effect.catch((error) =>
@@ -122,8 +150,6 @@ export const makeEnvironmentShellState = Effect.fn("EnvironmentShellState.make")
       );
       if (!saved) return;
       lastPersisted = snapshot;
-      // Only lifecycle flushes chase updates that arrived during an in-flight save.
-      // The regular worker leaves those updates for the next write window.
       if (!flush) return;
     }
   }, persistenceLock.withPermit);
@@ -180,19 +206,52 @@ export const makeEnvironmentShellState = Effect.fn("EnvironmentShellState.make")
   // time, so neither can overwrite what the other wrote in between.
   const snapshotWriteLock = yield* Semaphore.make(1);
 
-  // Apply each received batch with one state write. The RPC client's bounded
-  // buffer can split a server chunk, so a bulk action can still need several
-  // writes, but each write includes every event in that batch.
   const applyItems = Effect.fn("EnvironmentShellState.applyItems")(function* (
     items: ReadonlyArray<OrchestrationV2ShellStreamItem>,
-    // Ids of rows whose links will fill later; they are held out of saves before one queues.
     pendingLinkIds?: ReadonlySet<ThreadId>,
   ) {
     const initial = yield* SubscriptionRef.get(state);
     let waiting = yield* Ref.get(awaitingCompletion);
     let next = initial;
     let receivedSnapshot = false;
+    let deltas: Array<ShellStreamEvent> = [];
+    const flushDeltas = () => {
+      if (deltas.length > 0 && Option.isSome(next.snapshot)) {
+        let sequence = next.snapshot.value.snapshotSequence;
+        let removedAt: Map<ThreadId, number> | undefined;
+        for (const delta of deltas) {
+          if (delta.sequence <= sequence) continue;
+          switch (delta.kind) {
+            case "thread.removed":
+              removedAt ??= new Map(next.removedAt);
+              removedAt.set(delta.threadId, delta.sequence);
+              break;
+            case "thread.updated":
+            case "project.updated":
+            case "project.removed":
+              break;
+            default:
+              continue;
+          }
+          sequence = delta.sequence;
+        }
+        next = {
+          ...next,
+          removedAt: removedAt ?? next.removedAt,
+          snapshot: Option.some(applyShellStreamEvents(next.snapshot.value, deltas)),
+          status: waiting ? "synchronizing" : "live",
+          error: Option.none(),
+        };
+      }
+      deltas = [];
+    };
     for (const item of items) {
+      if (item.kind !== "snapshot" && item.kind !== "synchronized") {
+        deltas.push(item);
+        continue;
+      }
+      // Snapshots can reset the cursor; completion markers change the sync status.
+      flushDeltas();
       if (item.kind === "synchronized") {
         waiting = false;
         if (Option.isSome(next.snapshot)) {
@@ -200,32 +259,24 @@ export const makeEnvironmentShellState = Effect.fn("EnvironmentShellState.make")
         }
         continue;
       }
-      const nextSnapshot =
-        item.kind === "snapshot"
-          ? mergeShellSnapshotProjects(
-              Option.getOrNull(next.snapshot),
-              item.snapshot,
-              item.resolvedRepositoryIdentityRoots === undefined
-                ? undefined
-                : {
-                    resolvedRepositoryIdentityRoots: item.resolvedRepositoryIdentityRoots,
-                  },
-            )
-          : Option.match(next.snapshot, {
-              onNone: () => null,
-              onSome: (snapshot) =>
-                item.sequence > snapshot.snapshotSequence
-                  ? applyShellStreamEvent(snapshot, item)
-                  : snapshot,
-            });
-      if (nextSnapshot === null) continue;
-      receivedSnapshot ||= item.kind === "snapshot";
+      const authoritative = item.resolvedRepositoryIdentityRoots === undefined;
+      const nextSnapshot = mergeShellSnapshotProjects(
+        Option.getOrNull(next.snapshot),
+        item.snapshot,
+        item.resolvedRepositoryIdentityRoots === undefined
+          ? undefined
+          : { resolvedRepositoryIdentityRoots: item.resolvedRepositoryIdentityRoots },
+      );
+      receivedSnapshot = true;
       next = {
         snapshot: Option.some(nextSnapshot),
         status: waiting ? "synchronizing" : "live",
         error: Option.none(),
+        generation: authoritative ? ++lastShellGeneration : next.generation,
+        removedAt: authoritative ? EMPTY_REMOVALS : next.removedAt,
       };
     }
+    flushDeltas();
     yield* Ref.set(awaitingCompletion, waiting);
     if (next === initial) return;
     if (pendingLinkIds !== undefined && Option.isSome(next.snapshot)) {
@@ -248,14 +299,10 @@ export const makeEnvironmentShellState = Effect.fn("EnvironmentShellState.make")
     }
   }, snapshotWriteLock.withPermit);
 
-  // Rows can arrive before their pull request links (see DeferredShellSnapshot), so the list
-  // paints first. The links then fill into the rows that still hold the object they arrived
-  // with; a row the server has replaced since carries its own links.
-  // Captured so fills started from the subscription callback still end with this state.
   const stateScope = yield* Effect.scope;
   // Each full snapshot supersedes the previous one's fill; links from an older snapshot must
-  // not land on rows a newer snapshot reused. A cancelled fill's rows stay pending until the
-  // next snapshot replaces the pending set.
+  // not land on rows a newer snapshot reused.
+
   let activeFill: Fiber.Fiber<void> | undefined;
   const cancelActiveFill = Effect.suspend(() => {
     const fill = activeFill;
@@ -293,7 +340,6 @@ export const makeEnvironmentShellState = Effect.fn("EnvironmentShellState.make")
           const threads = snapshot.threads.map((thread) => {
             if (!arrivedRows.has(thread) || !arrivedIds.has(thread.id)) return thread;
             const links = linksByThreadId.get(thread.id);
-            // A reused row may already hold these links from an earlier fill.
             if (sameThreadPullRequests(thread.pullRequests, links)) return thread;
             changed = true;
             if (links === undefined) {
@@ -307,8 +353,6 @@ export const makeEnvironmentShellState = Effect.fn("EnvironmentShellState.make")
           return [Option.some(next), { ...current, snapshot: Option.some(next) }];
         },
       );
-      // Saves skipped while links were pending are queued again. Cached rows are never live:
-      // until a server snapshot arrives there is nothing new to save.
       pendingLinkRows = new Set();
       const live = yield* Ref.get(latestLiveSnapshot);
       if (Option.isNone(live)) return;
@@ -334,11 +378,15 @@ export const makeEnvironmentShellState = Effect.fn("EnvironmentShellState.make")
       ORCHESTRATION_V2_WS_METHODS.subscribeShell,
       Effect.fn("EnvironmentShellState.makeSubscribeInput")(function* (session) {
         yield* Ref.set(activeSubscriptionSession, session);
-        const supportsCompletionMarker = yield* session.initialConfig.pipe(
-          Effect.map((config) => config.shellResumeCompletionMarker === true),
-          Effect.orElseSucceed(() => false),
+        const { omitIdleSubagents, omitOlderSettled } = yield* session.initialConfig.pipe(
+          Effect.map((config) => ({
+            omitIdleSubagents: config.shellThreadFamilies === true,
+            omitOlderSettled:
+              config.shellOlderSettled === true && config.shellThreadFamilies === true,
+          })),
+          Effect.orElseSucceed(() => ({ omitIdleSubagents: false, omitOlderSettled: false })),
         );
-        yield* Ref.set(awaitingCompletion, supportsCompletionMarker);
+        yield* Ref.set(awaitingCompletion, true);
         yield* setSynchronizing;
 
         // Foreground resubscriptions on the same live session can resume from
@@ -362,7 +410,11 @@ export const makeEnvironmentShellState = Effect.fn("EnvironmentShellState.make")
               }),
             ),
           );
-          const httpSnapshot = yield* snapshotLoader.load(prepared);
+          // HTTP and the socket must agree, or omitted children would return through the socket.
+          const httpSnapshot = yield* snapshotLoader.load(prepared, {
+            omitIdleSubagents,
+            omitOlderSettled,
+          });
           if (Option.isSome(httpSnapshot)) {
             yield* cancelActiveFill;
             const previous = yield* SubscriptionRef.get(state);
@@ -384,23 +436,17 @@ export const makeEnvironmentShellState = Effect.fn("EnvironmentShellState.make")
           }
         }
 
-        // If the authoritative refresh failed, omit the cached cursor so the
-        // socket fallback sends a complete snapshot for this new session.
+        const omission = {
+          ...(omitIdleSubagents ? { omitIdleSubagents: true as const } : {}),
+          ...(omitOlderSettled ? { omitOlderSettled: true as const } : {}),
+        };
         if (!canResume || Option.isNone(current.snapshot)) {
-          return supportsCompletionMarker ? { requestCompletionMarker: true as const } : {};
-        }
-        if (!supportsCompletionMarker) {
-          // Without a completion marker there is no synchronized signal for a
-          // resumed subscription, so report live immediately, like threads.
-          yield* SubscriptionRef.update(state, (value) => ({
-            ...value,
-            status: "live" as const,
-            error: Option.none(),
-          }));
+          return { ...omission, requestCompletionMarker: true as const };
         }
         return {
           afterSequence: current.snapshot.value.snapshotSequence,
-          ...(supportsCompletionMarker ? { requestCompletionMarker: true as const } : {}),
+          ...omission,
+          requestCompletionMarker: true as const,
         };
       }),
       {
@@ -437,16 +483,12 @@ function shellStateChanges(environmentId: EnvironmentId) {
 export interface EnvironmentShellSummary {
   readonly hasSnapshot: boolean;
   readonly hasSynchronizingShell: boolean;
-  readonly hasCachedShell: boolean;
-  readonly hasLiveShell: boolean;
   readonly firstError: string | null;
 }
 
 const EMPTY_ENVIRONMENT_SHELL_SUMMARY: EnvironmentShellSummary = Object.freeze({
   hasSnapshot: false,
   hasSynchronizingShell: false,
-  hasCachedShell: false,
-  hasLiveShell: false,
   firstError: null,
 });
 
@@ -459,8 +501,6 @@ function shellSummariesEqual(
   return (
     left.hasSnapshot === right.hasSnapshot &&
     left.hasSynchronizingShell === right.hasSynchronizingShell &&
-    left.hasCachedShell === right.hasCachedShell &&
-    left.hasLiveShell === right.hasLiveShell &&
     left.firstError === right.firstError
   );
 }
@@ -485,15 +525,11 @@ export function createEnvironmentShellSummaryAtom(input: {
   return Atom.make((get) => {
     let hasSnapshot = false;
     let hasSynchronizingShell = false;
-    let hasCachedShell = false;
-    let hasLiveShell = false;
     let firstError: string | null = null;
 
     for (const environmentId of enabledEnvironmentIds(get(input.catalogValueAtom))) {
       const state = get(input.shellStateValueAtom(environmentId));
       hasSynchronizingShell ||= state.status === "synchronizing";
-      hasCachedShell ||= state.status === "cached";
-      hasLiveShell ||= state.status === "live";
       if (firstError === null) {
         firstError = Option.getOrNull(state.error);
       }
@@ -506,8 +542,6 @@ export function createEnvironmentShellSummaryAtom(input: {
     const next: EnvironmentShellSummary = {
       hasSnapshot,
       hasSynchronizingShell,
-      hasCachedShell,
-      hasLiveShell,
       firstError,
     };
     if (shellSummariesEqual(previousSummary, next)) {
@@ -539,6 +573,27 @@ export function createEnvironmentServerConfigsAtom(input: {
   }).pipe(Atom.withLabel("environment-server-configs"));
 }
 
+/**
+ * Every shell push replaces the state, so views that gate on load progress read these
+ * primitives instead and stay put while threads stream.
+ */
+function createEnvironmentShellProgressAtoms(
+  stateValueAtom: (environmentId: EnvironmentId) => Atom.Atom<EnvironmentShellState>,
+) {
+  return {
+    statusAtom: Atom.family((environmentId: EnvironmentId) =>
+      Atom.make((get) => get(stateValueAtom(environmentId)).status).pipe(
+        Atom.withLabel(`environment-shell-status:${environmentId}`),
+      ),
+    ),
+    hasSnapshotAtom: Atom.family((environmentId: EnvironmentId) =>
+      Atom.make((get) => Option.isSome(get(stateValueAtom(environmentId)).snapshot)).pipe(
+        Atom.withLabel(`environment-shell-has-snapshot:${environmentId}`),
+      ),
+    ),
+  };
+}
+
 export function createEnvironmentShellAtoms<R, E>(
   runtime: Atom.AtomRuntime<
     | EnvironmentRegistry.EnvironmentRegistry
@@ -556,13 +611,17 @@ export function createEnvironmentShellAtoms<R, E>(
 
   const stateValueAtom = Atom.family((environmentId: EnvironmentId) =>
     Atom.make((get) =>
-      Option.getOrElse(AsyncResult.value(get(stateAtom(environmentId))), () => EMPTY_SHELL_STATE),
+      AsyncResult.getOrElse(get(stateAtom(environmentId)), () => EMPTY_SHELL_STATE),
     ).pipe(Atom.withLabel(`environment-shell-state-value:${environmentId}`)),
   );
+
+  const { statusAtom, hasSnapshotAtom } = createEnvironmentShellProgressAtoms(stateValueAtom);
 
   return {
     stateAtom,
     stateValueAtom,
+    statusAtom,
+    hasSnapshotAtom,
   };
 }
 

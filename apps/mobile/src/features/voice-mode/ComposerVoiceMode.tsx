@@ -9,8 +9,8 @@ import Animated, {
   type SharedValue,
 } from "react-native-reanimated";
 
-import { AppText as Text } from "../../components/AppText";
-import { SymbolView, type AppSymbolName } from "../../components/AppSymbol";
+import { AppText as Text } from "../../components/ui/AppText";
+import { SymbolView, type AppSymbolName } from "../../components/ui/AppSymbol";
 import { cn } from "../../lib/cn";
 import { useVoiceModeState } from "./useVoiceMode";
 import { voiceMode } from "./voiceMode";
@@ -106,6 +106,7 @@ export function ComposerVoiceStrip() {
 
   // Levels arrive at 10Hz; they drive shared values directly, and the
   // speaking flag only re-renders when it flips.
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- subscribes the meters to the voice level stream
   useEffect(() => {
     const isSpeaking = createSpeakingDetector();
     const unsubscribe = voiceMode.subscribeLevels((levels) => {

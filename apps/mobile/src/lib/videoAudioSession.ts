@@ -6,25 +6,18 @@ const nativeControls = requireOptionalNativeModule<{
   releaseVideoAudioSession(): Promise<void>;
 }>("T3NativeControls");
 
-// Players report not playing during seeks and buffering stalls, and another
-// player may start right after one stops. Both keep the session.
+// Keep the session through seeks, buffering, and brief gaps between players.
 const RELEASE_DELAY_MS = 1_000;
 
 let playingCount = 0;
 let releaseTimer: ReturnType<typeof setTimeout> | undefined;
 
-/** Pairs with `mediaPlaybackStopped` for each inline video or audio player holding the session. */
-export function mediaPlaybackStarted(): void {
+function mediaPlaybackStarted(): void {
   playingCount += 1;
 }
 
-/**
- * expo-video activates the iOS playback session but never deactivates it, so
- * interrupted apps (Spotify, Podcasts) are never told they may resume. The
- * last player to stop releases it. In-app audio previews count too, since
- * deactivating stops them.
- */
-export function mediaPlaybackStopped(): void {
+/** expo-video never deactivates iOS playback, preventing interrupted apps from resuming. Include audio previews to avoid stopping them. */
+function mediaPlaybackStopped(): void {
   playingCount -= 1;
   if (playingCount > 0 || Platform.OS !== "ios") return;
   clearTimeout(releaseTimer);
@@ -37,7 +30,6 @@ export function mediaPlaybackStopped(): void {
 let fullscreenCount = 0;
 const fullscreenListeners = new Set<() => void>();
 
-/** Pairs with `fullscreenVideoClosed` while the native fullscreen player is open. */
 export function fullscreenVideoOpened(): void {
   fullscreenCount += 1;
   for (const listener of fullscreenListeners) listener();
@@ -48,24 +40,23 @@ export function fullscreenVideoClosed(): void {
   for (const listener of fullscreenListeners) listener();
 }
 
-export function subscribeFullscreenVideo(listener: () => void): () => void {
+function subscribeFullscreenVideo(listener: () => void): () => void {
   fullscreenListeners.add(listener);
   return () => {
     fullscreenListeners.delete(listener);
   };
 }
 
-export function isFullscreenVideoOpen(): boolean {
+function isFullscreenVideoOpen(): boolean {
   return fullscreenCount > 0;
 }
 
-/** In-app players pause while the iOS fullscreen player owns playback and the session. */
 export function useFullscreenVideoOpen(): boolean {
   return useSyncExternalStore(subscribeFullscreenVideo, isFullscreenVideoOpen);
 }
 
-/** Holds the session for as long as `active`, releasing it with the last holder. */
 export function useMediaAudioSessionHold(active: boolean): void {
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- holds the shared native audio session while media plays and releases it on cleanup
   useEffect(() => {
     if (!active) return;
     mediaPlaybackStarted();

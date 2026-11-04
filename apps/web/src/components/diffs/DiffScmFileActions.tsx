@@ -1,12 +1,11 @@
 import { useAtomValue } from "@effect/atom-react";
 import type { FileDiffMetadata } from "@pierre/diffs";
 import { MinusIcon, PlusIcon, Trash2Icon } from "lucide-react";
-import { useMemo } from "react";
 
 import { buildFilePatchFromFileDiff, buildHunkPatchesFromFileDiff } from "~/lib/hunkPatch";
 import { resolveFileDiffPath } from "~/lib/diffRendering";
-import type { VcsRepositoryTarget } from "~/lib/sourceControlActions";
-import { useVcsChangeActions } from "~/lib/sourceControlActions";
+import type { VcsRepositoryTarget } from "~/state/sourceControlActions";
+import { useVcsChangeActions } from "~/state/sourceControlActions";
 import { vcsEnvironment } from "~/state/vcs";
 import { Button } from "../ui/button";
 import {
@@ -51,13 +50,10 @@ export function DiffScmFileActions(props: {
 }) {
   const vcsActions = useVcsChangeActions();
   const canWrite = useAtomValue(vcsEnvironment.paths.permissionAtom(props.target.environmentId));
-  const relativeDiff = useMemo(
-    () => fileDiffRelativeToRepository(props.fileDiff, props.repositoryPath),
-    [props.fileDiff, props.repositoryPath],
-  );
+  const relativeDiff = fileDiffRelativeToRepository(props.fileDiff, props.repositoryPath);
   const relativePath = resolveFileDiffPath(relativeDiff);
-  const hunks = useMemo(() => buildHunkPatchesFromFileDiff(relativeDiff), [relativeDiff]);
-  const filePatch = useMemo(() => buildFilePatchFromFileDiff(relativeDiff), [relativeDiff]);
+  const hunks = buildHunkPatchesFromFileDiff(relativeDiff);
+  const filePatch = buildFilePatchFromFileDiff(relativeDiff);
 
   const runFile = (kind: "stage" | "unstage" | "discard") => {
     if (kind === "stage") void vcsActions.stagePaths(props.target, [relativePath]);

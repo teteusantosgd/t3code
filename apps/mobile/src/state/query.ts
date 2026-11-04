@@ -1,6 +1,5 @@
 import { useAtomRefresh, useAtomValue } from "@effect/atom-react";
 import * as Cause from "effect/Cause";
-import * as Option from "effect/Option";
 import { AsyncResult, Atom } from "effect/reactivity";
 
 const EMPTY_ASYNC_RESULT_ATOM = Atom.make(AsyncResult.initial<never, never>(false)).pipe(
@@ -9,8 +8,10 @@ const EMPTY_ASYNC_RESULT_ATOM = Atom.make(AsyncResult.initial<never, never>(fals
 
 export interface EnvironmentQueryView<A> {
   readonly data: A | null;
+  readonly successResult: AsyncResult.Success<A, unknown> | null;
   readonly error: string | null;
   readonly failureCause: unknown;
+  readonly failure: unknown;
   readonly isPending: boolean;
   readonly isSuccess: boolean;
   readonly refresh: () => void;
@@ -30,7 +31,10 @@ export function useEnvironmentQuery<A, E>(
   const result = useAtomValue(selectedAtom);
   const refresh = useAtomRefresh(selectedAtom);
   return {
-    data: Option.getOrNull(AsyncResult.value(result)),
+    data: AsyncResult.getOrElse(result, () => null),
+    // Data may be structurally shared; only a settled success proves a new response.
+    successResult: result._tag === "Success" && !result.waiting ? result : null,
+    failure: result._tag === "Failure" ? Cause.squash(result.cause) : null,
     error: result._tag === "Failure" ? formatError(result.cause) : null,
     failureCause: result._tag === "Failure" ? Cause.squash(result.cause) : null,
     isPending: atom !== null && result.waiting,

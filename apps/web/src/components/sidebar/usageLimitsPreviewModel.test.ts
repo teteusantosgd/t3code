@@ -32,7 +32,11 @@ function window(
     kind,
     label,
     members: [],
-    columns: columns.map(({ accountKey, window }) => ({ account: account(accountKey), window })),
+    columns: columns.map(({ accountKey, window }) =>
+      window === null
+        ? { account: account(accountKey), window: null }
+        : { account: account(accountKey), window, refillPercent: 0 },
+    ),
     remainingPercent: 50,
     usedPercent: 50,
     pace: null,

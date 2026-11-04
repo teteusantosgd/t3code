@@ -1,22 +1,20 @@
-import { useCallback, useLayoutEffect, useRef } from "react";
+import { useInsertionEffect, useRef, useState } from "react";
 
-/**
- * Returns a function with a fixed identity that always calls the latest `fn`.
- * Only call it from event handlers and effects; during render it would see the
- * previous commit's `fn`.
- *
- * Use it for event handlers in large, long-lived components. A `useCallback`
- * result keeps the render scope it was created in, and V8 shares one scope
- * between all closures of a render. When several memoized handlers change at
- * different times, each keeps an older scope holding older copies of the
- * others, and old renders pile up for as long as the component is mounted.
- */
+/** Call only from handlers and effects; render sees the previous commit's fn. */
 export function useStableCallback<Args extends ReadonlyArray<unknown>, Result>(
   fn: (...args: Args) => Result,
 ): (...args: Args) => Result {
   const latest = useRef(fn);
-  useLayoutEffect(() => {
+  // Insertion effects run before every layout effect in the commit, so a
+  // child's layout effect already calls this render's fn.
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- updates the ref during commit, before any layout effect can call the stable callback
+  useInsertionEffect(() => {
     latest.current = fn;
   });
-  return useCallback((...args: Args) => latest.current(...args), []);
+  const [stable] = useState(
+    () =>
+      (...args: Args) =>
+        latest.current(...args),
+  );
+  return stable;
 }

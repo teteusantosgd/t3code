@@ -1,12 +1,8 @@
 /**
- * Codex voice conversations: a thread-scoped realtime session whose audio runs
- * over WebRTC between the client and OpenAI. The app-server only relays the
- * SDP handshake, captions, and lifecycle; this module owns that signaling.
- *
- * Handoffs are client-managed, matching the Codex TUI: the realtime model
- * delegates work by starting a Codex turn whose user message is wrapped in
- * `<realtime_delegation>`, and when that turn finishes we hand its final
- * answer back with `thread/realtime/appendSpeech` so the voice reads it out.
+ * Codex voice signaling: audio runs over WebRTC between the client and OpenAI,
+ * so the app-server only relays SDP, captions, and lifecycle. A handoff is a
+ * Codex turn wrapped in `<realtime_delegation>`; its final answer goes back
+ * through `thread/realtime/appendSpeech` so the voice reads it out.
  */
 import type { ProviderVoiceSessionEvent } from "@t3tools/contracts";
 import * as Cause from "effect/Cause";
@@ -226,15 +222,14 @@ export const makeCodexVoice = Effect.fn("makeCodexVoice")(function* (
     ),
   );
 
-  const stop = (active: ActiveVoice) =>
-    Effect.gen(function* () {
-      yield* Ref.update(activeRef, (current) => (current === active ? undefined : current));
-      if (active.closed) return;
-      active.closed = true;
-      yield* client.raw
-        .request("thread/realtime/stop", { threadId: active.providerThreadId })
-        .pipe(Effect.ignore);
-    });
+  const stop = Effect.fn("CodexVoice.stop")(function* (active: ActiveVoice) {
+    yield* Ref.update(activeRef, (current) => (current === active ? undefined : current));
+    if (active.closed) return;
+    active.closed = true;
+    yield* client.raw
+      .request("thread/realtime/stop", { threadId: active.providerThreadId })
+      .pipe(Effect.ignore);
+  });
 
   /**
    * Starts a voice conversation. The stream ends when Codex closes the

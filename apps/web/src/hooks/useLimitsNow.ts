@@ -1,12 +1,9 @@
 import { useSyncExternalStore } from "react";
 
 /**
- * One clock for every limits countdown. Usage and the sidebar must read the
- * same instant: a clock captured in only one of them drifts by however long
- * it has been since that surface last refreshed.
- *
- * The value advances once a minute, which is the resolution of the labels,
- * and on `bumpLimitsNow` when a refresh finishes.
+ * One clock for every limits countdown, so Usage and the sidebar never drift
+ * apart. It advances once a minute (the labels' resolution) and on
+ * `bumpLimitsNow` when a refresh finishes.
  */
 
 let limitsNow = Date.now();

@@ -13,6 +13,7 @@ import { getTerminalLabel, nextAgentTerminalId } from "@t3tools/shared/terminalL
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
+import * as Stream from "effect/Stream";
 import * as TestClock from "effect/testing/TestClock";
 import { McpSchema, McpServer } from "effect/ai";
 
@@ -192,29 +193,6 @@ const makeStubTerminalManager = (): StubTerminalManager => {
     },
   );
 
-  const restart: TerminalManager.TerminalManager["Service"]["restart"] = Effect.fn("stub.restart")(
-    function* (input) {
-      const session = sessions.get(key(input.threadId, input.terminalId));
-      if (!session) {
-        return yield* new TerminalSessionLookupError({
-          threadId: input.threadId,
-          terminalId: input.terminalId,
-        });
-      }
-      session.history = "";
-      session.cwd = input.cwd;
-      session.status = "running";
-      const snapshot = snapshotOf(session);
-      yield* publish({
-        type: "restarted",
-        threadId: input.threadId,
-        terminalId: input.terminalId,
-        snapshot,
-      });
-      return snapshot;
-    },
-  );
-
   const close: TerminalManager.TerminalManager["Service"]["close"] = Effect.fn("stub.close")(
     function* (input) {
       const targets = [...sessions.values()].filter(
@@ -302,11 +280,13 @@ const makeStubTerminalManager = (): StubTerminalManager => {
       open,
       openNewTerminal,
       attachStream,
+      attachOutputStream: () => Stream.empty,
       observeStream: () => Effect.succeed(() => {}),
+      resyncStream: () => Effect.succeed(() => {}),
+      getShell: () => Effect.succeed("/bin/zsh"),
       write,
       resize: () => Effect.void,
       clear,
-      restart,
       close,
       closeIdle: () => Effect.void,
       subscribe,
@@ -811,6 +791,7 @@ const callRegistered = (
     Effect.provideService(McpSchema.McpServerClient, mcpClient),
     Effect.provide(
       McpHttpServer.toolkitRegistration(TerminalToolkit, TerminalHandlers.layer).pipe(
+        Layer.provideMerge(McpHttpServer.layerInProcessMcpServer),
         Layer.provideMerge(McpServer.McpServer.layer),
         Layer.provideMerge(
           Layer.mock(ThreadManagement.ThreadManagementService)({

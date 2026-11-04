@@ -15,7 +15,7 @@ import {
   Trash2Icon,
 } from "lucide-react";
 import { RefreshIcon } from "~/components/ui/refresh-icon";
-import { useCallback, useMemo, useState, type ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 
 import {
   changesExpandedFileKey,
@@ -34,7 +34,7 @@ import {
   useGitStackedAction,
   useVcsChangeActions,
   type VcsRepositoryTarget,
-} from "~/lib/sourceControlActions";
+} from "~/state/sourceControlActions";
 import { cn } from "~/lib/utils";
 import { useRightPanelStore } from "~/rightPanelStore";
 import { useEnvironmentQuery } from "~/state/query";
@@ -350,38 +350,32 @@ function RepositoryChangesCard(props: {
     }
   };
 
-  const runPathsAction = useCallback(
-    (kind: "stage" | "unstage" | "discard", paths: ReadonlyArray<string>) => {
-      if (paths.length === 0) return;
-      const action =
-        kind === "stage"
-          ? props.vcsActions.stagePaths
-          : kind === "unstage"
-            ? props.vcsActions.unstagePaths
-            : props.vcsActions.discardPaths;
-      void action(target, paths);
-    },
-    [props.vcsActions, target],
-  );
+  const runPathsAction = (kind: "stage" | "unstage" | "discard", paths: ReadonlyArray<string>) => {
+    if (paths.length === 0) return;
+    const action =
+      kind === "stage"
+        ? props.vcsActions.stagePaths
+        : kind === "unstage"
+          ? props.vcsActions.unstagePaths
+          : props.vcsActions.discardPaths;
+    void action(target, paths);
+  };
 
-  const handleCommit = useCallback(
-    (mode: "staged" | "all" | "amend") => {
-      if (mode === "amend") {
-        void props.vcsActions.amendCommit(target, props.commitMessage);
-        return;
-      }
-      const message = props.commitMessage.trim();
-      void props.runCommit.run({
-        actionId: randomUUID(),
-        action: "commit",
-        ...(message ? { commitMessage: message } : {}),
-        // "staged" commits the index as is; sending filePaths would re-stage
-        // those files from the working tree.
-        commitScope: mode === "all" || stagedCount === 0 ? "all" : "staged",
-      });
-    },
-    [props.commitMessage, props.runCommit, props.vcsActions, stagedCount, target],
-  );
+  const handleCommit = (mode: "staged" | "all" | "amend") => {
+    if (mode === "amend") {
+      void props.vcsActions.amendCommit(target, props.commitMessage);
+      return;
+    }
+    const message = props.commitMessage.trim();
+    void props.runCommit.run({
+      actionId: randomUUID(),
+      action: "commit",
+      ...(message ? { commitMessage: message } : {}),
+      // "staged" commits the index as is; sending filePaths would re-stage
+      // those files from the working tree.
+      commitScope: mode === "all" || stagedCount === 0 ? "all" : "staged",
+    });
+  };
 
   return (
     <section className="rounded-lg border border-border/60 bg-card/40">
@@ -749,7 +743,7 @@ export default function ChangesPanel({
     resourceKey: `changes-panel:${environmentId ?? ""}:${activeCwd ?? ""}`,
   });
 
-  const repositoryCards = useMemo((): RepositoryCardModel[] => {
+  const repositoryCards = ((): RepositoryCardModel[] => {
     if (!activeCwd) return [];
     return [
       {
@@ -761,26 +755,20 @@ export default function ChangesPanel({
         isRepo: primaryStatusQuery.data?.isRepo === true,
       },
     ];
-  }, [activeCwd, activeProject?.title, primaryStatusQuery.data, primaryStatusQuery.isPending]);
+  })();
 
   const vcsActions = useVcsChangeActions();
 
-  const openInDiffPanel = useCallback(
-    (_displayPath: string, _scope: DiffPanelGitScope, _cwd: string) => {
-      if (!routeThreadRef) return;
-      useDiffPanelStore.getState().selectGitScope(routeThreadRef, "unstaged");
-      useRightPanelStore.getState().open(routeThreadRef, "diff");
-    },
-    [routeThreadRef],
-  );
+  const openInDiffPanel = (_displayPath: string, _scope: DiffPanelGitScope, _cwd: string) => {
+    if (!routeThreadRef) return;
+    useDiffPanelStore.getState().selectGitScope(routeThreadRef, "unstaged");
+    useRightPanelStore.getState().open(routeThreadRef, "diff");
+  };
 
-  const onToggleExpand = useCallback(
-    (key: string) => {
-      if (!routeThreadRef) return;
-      toggleExpandedFileKey(routeThreadRef, key);
-    },
-    [routeThreadRef, toggleExpandedFileKey],
-  );
+  const onToggleExpand = (key: string) => {
+    if (!routeThreadRef) return;
+    toggleExpandedFileKey(routeThreadRef, key);
+  };
 
   const header = (
     <div className="flex min-w-0 flex-1 items-center gap-2">

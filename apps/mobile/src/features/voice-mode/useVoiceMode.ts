@@ -39,11 +39,13 @@ export function useVoiceModeThreadLifecycle(target: VoiceSessionTarget): void {
     const params = route?.params;
     return params && "threadId" in params ? String(params.threadId) : null;
   });
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- stops the conversation when navigation leaves its thread
   useEffect(() => {
     if (visibleThreadId !== threadId && voiceMode.isActiveFor({ environmentId, threadId }))
       voiceMode.stop();
   }, [environmentId, threadId, visibleThreadId]);
 
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- stops the conversation when its thread screen unmounts
   useEffect(
     () => () => {
       if (routeName === "Thread" && voiceMode.isActiveFor({ environmentId, threadId }))
@@ -52,6 +54,7 @@ export function useVoiceModeThreadLifecycle(target: VoiceSessionTarget): void {
     [environmentId, threadId, routeName],
   );
 
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- shows each voice notice for this thread once as an alert
   useEffect(() => {
     // Reads the live state: dismissing notifies listeners re-entrantly, so a
     // listener's argument can already be stale.

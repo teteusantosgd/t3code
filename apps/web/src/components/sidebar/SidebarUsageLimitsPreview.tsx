@@ -9,7 +9,7 @@ import {
 } from "@t3tools/shared/usageLimits";
 import * as Schema from "effect/Schema";
 import { ChevronDownIcon } from "lucide-react";
-import { Fragment, useCallback, useEffect, useEffectEvent, useMemo } from "react";
+import { Fragment, useEffect, useEffectEvent } from "react";
 
 import { bumpLimitsNow, useLimitsNow } from "../../hooks/useLimitsNow";
 import { useLocalStorage } from "../../hooks/useLocalStorage";
@@ -115,7 +115,7 @@ function CompactWindowRow({
  * expand/collapse the same way Settled rows do.
  */
 export function SidebarUsageLimitsPreview({ className }: { readonly className?: string }) {
-  const presentations = useAtomValue(environmentPresentations.presentationsAtom);
+  const presentations = useAtomValue(environmentPresentations.presentationsWithProvidersAtom);
   const refreshProviders = useAtomCommand(serverEnvironment.refreshProviders, {
     reportFailure: false,
   });
@@ -123,22 +123,18 @@ export function SidebarUsageLimitsPreview({ className }: { readonly className?: 
   const now = useLimitsNow();
   const [expanded, setExpanded] = useLocalStorage(LIMITS_SHELF_EXPANDED_KEY, true, Schema.Boolean);
   const [showProviderLimits] = useLocalStorage(SIDEBAR_PROVIDER_LIMITS_KEY, true, Schema.Boolean);
-  const toggleExpanded = useCallback(() => setExpanded((value) => !value), [setExpanded]);
-  const pools = useMemo(
-    () =>
-      sidebarPreviewPools(
-        collectLimitPools(collectLimitAccounts(presentations), now),
-        showProviderLimits,
-      ),
-    [now, presentations, showProviderLimits],
+  const toggleExpanded = () => setExpanded((value) => !value);
+  const pools = sidebarPreviewPools(
+    collectLimitPools(collectLimitAccounts(presentations), now),
+    showProviderLimits,
   );
   const visible = hasSidebarUsagePreview(pools);
 
-  const openUsageLimits = useCallback(() => {
+  const openUsageLimits = () => {
     const preferences = readUsagePagePreferences();
     saveUsagePagePreferences({ ...preferences, metric: "limits" });
     void navigate({ to: "/usage" });
-  }, [navigate]);
+  };
 
   const refreshLimits = useEffectEvent(async (automatic: boolean) => {
     try {
@@ -168,6 +164,7 @@ export function SidebarUsageLimitsPreview({ className }: { readonly className?: 
     .sort()
     .join(",");
 
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- refreshes provider limits when the set of connected environments changes
   useEffect(() => {
     if (!connectedKey) return;
     void refreshLimits(true);

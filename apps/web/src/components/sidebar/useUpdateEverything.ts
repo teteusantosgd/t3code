@@ -1,26 +1,25 @@
 import { useAtomValue } from "@effect/atom-react";
 import { PROVIDER_DISPLAY_NAMES } from "@t3tools/contracts";
-import { Atom } from "effect/reactivity";
-import { useMemo } from "react";
 
 import { APP_VERSION } from "~/branding";
 import { isDesktopLocalConnectionTarget } from "~/connection/desktopLocal";
 import { isElectron } from "~/env";
 import { useEnvironments } from "~/state/environments";
-import { useNpmReleasePublished } from "~/state/npmRelease";
-import { serverEnvironment } from "~/state/server";
-import { environmentSession } from "~/state/session";
+import { environmentIdsKey } from "~/state/environmentAtomList";
+import { environmentUpdateStatesAtom } from "~/state/server";
+import { environmentSessionStatesAtom } from "~/state/session";
 import { getProviderUpdateRunOutcome } from "../ProviderUpdateLaunchNotification.logic";
 import { useProviderUpdates } from "../ProviderUpdatesAction";
 import { canUpdateServer, type ServerUpdateOutcome, useServerUpdate } from "../ServerUpdateAction";
 import {
+  type ChannelSwitchRelease,
   closeFinishedUpdateRun,
+  collectChannelSwitchTargets,
   collectRestartingMachines,
   collectServerUpdateTargets,
   collectUpdateEverythingResult,
   describeUpdateEverything,
   runUpdateEverything,
-  type SkippedMachine,
   type UpdateRunMachine,
 } from "./updateEverything.logic";
 import {
@@ -33,75 +32,56 @@ import {
   waitForUpdateRestart,
 } from "./updateEverythingRun";
 
-/** How long this app counts down before it relaunches, so the user can postpone it. */
 const UPDATE_RESTART_DELAY_MS = 5_000;
 
-/** Where this app's own download or install reports a failure. */
+/** Servers this desktop app runs; they update with it. */
+export function isHostedByThisApp(
+  environment: ReturnType<typeof useEnvironments>["environments"][number],
+) {
+  return (
+    isElectron &&
+    (environment.entry.target._tag === "PrimaryConnectionTarget" ||
+      isDesktopLocalConnectionTarget(environment.entry.target))
+  );
+}
+
 export type ReportLocalUpdateError = (title: string, description: string) => void;
 
-/**
- * The remote half of the sidebar update button: outdated providers on every
- * connected machine, and servers behind the version this client runs or is
- * about to install (`localUpdateVersion`). Servers that install from npm appear
- * only once npm confirms that version. `run` performs the whole pass, including
- * this app's own download and install when given. It updates quietly, tracks
- * each machine in the run state, and reports one summary toast at the end.
- * This app relaunches once every server restarts into its update, after a
- * short countdown the user can postpone. The summary then waits for the
- * relaunch, and servers still restarting are followed after it.
- */
-export function useUpdateEverything(localUpdateVersion: string | null) {
+/** `channelSwitch` makes the run move the fleet to that release's track instead of updating it. */
+export function useUpdateEverything(
+  localUpdateVersion: string | null,
+  channelSwitch?: ChannelSwitchRelease,
+) {
   const targetVersion = localUpdateVersion ?? APP_VERSION;
   const { environments } = useEnvironments();
-  const machinesAtom = useMemo(
-    () =>
-      Atom.make((get) =>
-        environments.map((environment) => ({
-          environmentId: environment.environmentId,
-          label: environment.label,
-          serverConfig: environment.serverConfig,
-          connected: environment.connection.phase === "connected",
-          hostedByThisApp:
-            isElectron &&
-            (environment.entry.target._tag === "PrimaryConnectionTarget" ||
-              isDesktopLocalConnectionTarget(environment.entry.target)),
-          canMaintain: canUpdateServer(
-            get(environmentSession.sessionStateAtom(environment.environmentId)),
-          ),
-          updateState: get(serverEnvironment.updateStateAtom(environment.environmentId)),
-        })),
-      ),
-    [environments],
-  );
-  const machines = useAtomValue(machinesAtom);
-  const { targets: behindServers, skipped: unreachable } = collectServerUpdateTargets(
-    machines,
-    targetVersion,
-  );
-  // A desktop-managed server installs from its own app's update feed, so only
-  // servers that download t3 from npm wait for npm to publish the version.
-  const needsNpm = behindServers.some((server) => server.selfUpdate !== "desktop-managed");
-  const published = useNpmReleasePublished(needsNpm ? targetVersion : null);
-  const servers = published
-    ? behindServers
-    : behindServers.filter((server) => server.selfUpdate === "desktop-managed");
-  const skipped: ReadonlyArray<SkippedMachine> = [
-    ...unreachable,
-    ...behindServers
-      .filter((server) => !servers.includes(server))
-      .map((server) => ({
-        environmentId: server.environmentId,
-        label: server.serverLabel,
-        reason: `t3@${targetVersion} is not on npm yet`,
-      })),
-  ];
-  const restarts = collectRestartingMachines(machines, servers, localUpdateVersion !== null);
-  const providers = useProviderUpdates();
+  const environmentIds = environmentIdsKey(environments.map(({ environmentId }) => environmentId));
+  const sessionStates = useAtomValue(environmentSessionStatesAtom(environmentIds));
+  const updateStates = useAtomValue(environmentUpdateStatesAtom(environmentIds));
+  const machines = environments.map((environment, index) => ({
+    environmentId: environment.environmentId,
+    label: environment.label,
+    serverConfig: environment.serverConfig,
+    connected: environment.connection.phase === "connected",
+    hostedByThisApp: isHostedByThisApp(environment),
+    canMaintain: canUpdateServer(sessionStates[index]!),
+    updateState: updateStates[index]!,
+  }));
+  const { targets: servers, skipped } = channelSwitch
+    ? collectChannelSwitchTargets(machines, channelSwitch)
+    : collectServerUpdateTargets(machines, targetVersion);
+  // Track-only hosts save a setting and restart nothing, so they are neither listed nor counted.
+  const moving = servers.filter((server) => server.trackOnly !== true);
+  const restarts = collectRestartingMachines(machines, moving, localUpdateVersion !== null);
+  const providerUpdates = useProviderUpdates();
+  // A track switch moves app and servers only; provider updates stay a separate choice.
+  const providers = channelSwitch ? { machines: [], updateAll: async () => [] } : providerUpdates;
   const updateServer = useServerUpdate();
 
-  const { summary, lines } = describeUpdateEverything({
+  const view = describeUpdateEverything({
     localVersion: localUpdateVersion,
-    servers,
+    localMachines: machines.filter((machine) => machine.hostedByThisApp),
+    servers: moving,
+    skipped,
     providerMachines: providers.machines.map((machine) => ({
       environmentId: machine.environmentId,
       label: machine.label,
@@ -113,16 +93,8 @@ export function useUpdateEverything(localUpdateVersion: string | null) {
 
   return {
     hasUpdates: servers.length > 0 || providers.machines.length > 0,
-    /** Short label for the tooltip and the confirmation title. */
-    summary,
-    /** One line per machine, for the confirmation. */
-    lines,
-    /** The servers this run restarts, which stops their running threads. */
+    ...view,
     restarts,
-    /** Behind machines the run leaves alone, with the reason. */
-    skipped,
-    /** Runs the pass. `installLocal` resolves true when this app is relaunching.
-        Both report failures to the pass, which lists them in its summary. */
     run: async ({
       downloadLocal,
       installLocal,
@@ -165,6 +137,7 @@ export function useUpdateEverything(localUpdateVersion: string | null) {
       }
       const localVersion = installLocal ? localUpdateVersion : null;
       setUpdateEverythingRun(() => ({
+        ...(channelSwitch ? { trackSwitch: true } : {}),
         localVersion,
         phase: "providers",
         restartAt: null,
@@ -179,7 +152,6 @@ export function useUpdateEverything(localUpdateVersion: string | null) {
             const runs = await providers.updateAll({ quiet: true });
             const outcomes = runs.map((run) => {
               const runOutcome = getProviderUpdateRunOutcome(run);
-              // An interrupted update did not finish either, so its row is not "done".
               if (runOutcome.status !== "updated") {
                 providerFailures.set(
                   run.environmentId,
@@ -226,8 +198,6 @@ export function useUpdateEverything(localUpdateVersion: string | null) {
               finishedServers.push(finished);
               return finished;
             });
-            // Once a server restarts into its update it finishes on its own,
-            // so this app does not wait for it to come back.
             await Promise.all(
               servers.map((server, index) =>
                 waitForServerUpdateHandoff(server.environmentId, runs[index]!),
@@ -253,7 +223,6 @@ export function useUpdateEverything(localUpdateVersion: string | null) {
             clearSavedUpdateEverythingResult();
           }
         }
-        // This app is not relaunching, so the pass waits for every server.
         setUpdateEverythingRun(
           (run) =>
             run &&

@@ -1,6 +1,8 @@
 // @effect-diagnostics nodeBuiltinImport:off
 import * as NodeAssert from "node:assert/strict";
 import * as NodeCrypto from "node:crypto";
+import * as Digest from "effect/crypto/Digest";
+import * as Layer from "effect/Layer";
 import * as NodeFS from "node:fs";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
@@ -159,7 +161,7 @@ it.effect(
             );
           }),
         ),
-        Effect.provide(NodeServices.layer),
+        Effect.provide(Layer.mergeAll(NodeServices.layer, Digest.layerWebCrypto)),
       );
 
       const expectedFingerprint = NodeCrypto.createHash("sha256")
@@ -190,7 +192,7 @@ it.effect("reports a signed-out Console response as a failed probe", () =>
           Effect.succeed(HttpClientResponse.fromWeb(request, Response.json({}, { status: 401 }))),
         ),
       ),
-      Effect.provide(NodeServices.layer),
+      Effect.provide(Layer.mergeAll(NodeServices.layer, Digest.layerWebCrypto)),
     );
     NodeAssert.equal(limits.unavailable?.reason, "probeFailed");
     NodeAssert.deepEqual(limits.windows, []);
