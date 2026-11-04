@@ -882,27 +882,6 @@ describe("UsageService", () => {
     }).pipe(Effect.scoped, Effect.provide(TestClock.layer())),
   );
 
-  it.live("does not read the macOS Cursor Keychain before account usage is enabled", () =>
-    Effect.gen(function* () {
-      const { settings, home } = yield* setup;
-      const service = yield* UsageService.make.pipe(
-        Effect.provide(
-          layerService({
-            prefix: "usage-service-cursor-keychain-disabled",
-            home,
-            settings,
-            platform: "darwin",
-            environment: {},
-          }),
-        ),
-      );
-      const summary = yield* service.readSummary(WINDOW);
-      const cursor = summary.sources.find((source) => source.fingerprint.provider === "cursor");
-      assert.strictEqual(cursor?.status, "missing");
-      assert.strictEqual(cursor?.action, "enableCursorKeychain");
-    }).pipe(Effect.scoped),
-  );
-
   it.live("ignores stale Cursor file logins when the active credential store differs", () =>
     Effect.gen(function* () {
       const { settings, home } = yield* setup;

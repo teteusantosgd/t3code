@@ -79,11 +79,10 @@ export const CursorDriver: ProviderDriver<
   usage: {
     kind: "scan",
     provider: "cursor",
-    scan: ({ settings, windowStartMs, retentionCutoffMs, awaitRefresh }) =>
+    scan: ({ windowStartMs, retentionCutoffMs, awaitRefresh }) =>
       CursorUsageAccounts.CursorUsageAccounts.pipe(
         Effect.flatMap((accounts) =>
           accounts.scan({
-            keychainUsageEnabled: settings.cursorKeychainUsageEnabled,
             windowStartMs,
             retentionCutoffMs,
             awaitRefresh,
@@ -229,14 +228,9 @@ export const CursorDriver: ProviderDriver<
               effectiveConfig.enabled &&
               snapshot.installed &&
               snapshot.auth.status === "authenticated"
-                ? host.settings.get.pipe(
-                    Effect.flatMap((settings) =>
-                      readCursorUsageLimits(
-                        effectiveConfig,
-                        { ...processEnv, CURSOR_API_KEY: apiKey },
-                        settings.cursorKeychainUsageEnabled,
-                      ),
-                    ),
+                ? // Not the stored sign-in key: readCursorUsageLimits treats any
+                  // CURSOR_API_KEY as an explicit key on another account and skips it.
+                  readCursorUsageLimits(effectiveConfig, processEnv).pipe(
                     Effect.map((usageLimits) => ({ ...snapshot, usageLimits })),
                   )
                 : Effect.succeed(snapshot),

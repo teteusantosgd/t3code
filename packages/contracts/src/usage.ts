@@ -182,8 +182,6 @@ export const UsageSource = Schema.Struct({
    */
   distinctSessions: NonNegativeInt,
   message: Schema.NullOr(TrimmedNonEmptyString),
-  /** An action the client can offer to make this source available. */
-  action: Schema.optionalKey(Schema.Literal("enableCursorKeychain")),
   /**
    * Present when this source answered from its cache while a slow refresh (an
    * account API, for example) runs. Repeat the request with `awaitRefresh` to

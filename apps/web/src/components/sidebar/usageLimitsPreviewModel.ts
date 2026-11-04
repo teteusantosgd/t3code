@@ -1,10 +1,13 @@
 import type { ServerProviderUsageWindow } from "@t3tools/contracts";
 import { formatDuration, type LimitPool, type LimitPoolWindow } from "@t3tools/shared/usageLimits";
 
+/** Sidebar toggle for Cursor and OpenCode Go. The Limits page always lists them. */
+export const SIDEBAR_PROVIDER_LIMITS_KEY = "t3code:sidebar-provider-limits:v1";
+
 /**
  * Windows to show in the sidebar preview: session, weekly, and the plain
- * Monthly row (OpenCode Go's billing period, or Cursor's combined month).
- * Cursor's Monthly · API / Auto stay on the full Limits page.
+ * Monthly row (OpenCode Go's billing period). Cursor shows only Overall, its
+ * combined allowance; the per-pool rows stay on the full Limits page.
  */
 export function windowsForSidebarPreview(
   windows: readonly LimitPoolWindow[],
@@ -13,9 +16,20 @@ export function windowsForSidebarPreview(
     (window) =>
       window.kind === "session" ||
       window.kind === "weekly" ||
-      (window.kind === "monthly" && window.label === "Monthly"),
+      (window.kind === "monthly" && window.label === "Monthly") ||
+      window.id === "totalPercentUsed",
   );
   return glance.length > 0 ? glance : windows;
+}
+
+/** Pools the sidebar may preview. The toggle hides Cursor and OpenCode Go only. */
+export function sidebarPreviewPools(
+  pools: readonly LimitPool[],
+  showProviderLimits: boolean,
+): readonly LimitPool[] {
+  return showProviderLimits
+    ? pools
+    : pools.filter((pool) => pool.driver !== "cursor" && pool.driver !== "opencode");
 }
 
 /** True when any pool still has a window worth previewing. */

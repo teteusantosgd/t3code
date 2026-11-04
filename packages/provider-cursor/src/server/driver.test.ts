@@ -33,7 +33,8 @@ const layerTest = TestProviderHost.layer({ runBackgroundWork: false }).pipe(
   ),
   Layer.provideMerge(
     Layer.succeed(CursorKeychain.CursorKeychain, {
-      accessToken: Effect.die("The driver test must not read the Keychain"),
+      // No Cursor login in the Keychain: usage limits stay unavailable, with no request.
+      accessToken: Effect.succeed(null),
     }),
   ),
   Layer.provideMerge(

@@ -377,16 +377,11 @@ export const OpenCodeDriver: ProviderDriver<
             runtimeProbe.refresh,
             loadOpenCode2Models,
           ),
-          usageLimits: host.settings.get.pipe(
-            Effect.flatMap((settings) =>
-              readOpenCodeGoUsageLimits({
-                enabled: effectiveConfig.enabled,
-                usageLimitsEnabled: settings.openCodeUsageLimitsEnabled,
-                serverUrl: effectiveConfig.serverUrl,
-                environment: processEnv,
-              }),
-            ),
-          ),
+          usageLimits: readOpenCodeGoUsageLimits({
+            enabled: effectiveConfig.enabled,
+            serverUrl: effectiveConfig.serverUrl,
+            environment: processEnv,
+          }),
         },
         { concurrency: "unbounded" },
       ).pipe(

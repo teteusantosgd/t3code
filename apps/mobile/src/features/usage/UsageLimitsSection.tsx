@@ -380,6 +380,5 @@ export function useRefreshLimits(
     refreshing,
     failedLabels,
     refresh: refreshManually,
-    refreshAfterEnable: () => refresh(false, true),
   };
 }

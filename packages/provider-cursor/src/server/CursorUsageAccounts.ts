@@ -51,8 +51,6 @@ export class CursorUsageAccounts extends Context.Service<
   {
     /** This environment's Cursor account usage source, if it has one to report. */
     readonly scan: (input: {
-      /** From the same settings snapshot as the rest of the usage read. */
-      readonly keychainUsageEnabled: boolean;
       readonly windowStartMs: number;
       readonly retentionCutoffMs: number;
       readonly awaitRefresh: boolean;
@@ -281,7 +279,7 @@ const make = Effect.gen(function* () {
   });
 
   const scan: CursorUsageAccounts["Service"]["scan"] = Effect.fn("CursorUsageAccounts.scan")(
-    function* ({ keychainUsageEnabled, windowStartMs, retentionCutoffMs, awaitRefresh }) {
+    function* ({ windowStartMs, retentionCutoffMs, awaitRefresh }) {
       const home = yield* HostProcess.HomeDirectory;
       const userHome =
         (platform === "win32" ? hostEnvironment["USERPROFILE"] : hostEnvironment["HOME"]) || home;
@@ -304,17 +302,6 @@ const make = Effect.gen(function* () {
         Boolean(hostEnvironment["CURSOR_API_KEY"]?.trim()) ||
         credentialStore === "memory";
       const useKeychain = platform === "darwin" && credentialStore !== "file";
-      if (useKeychain && !loginUnavailable && !keychainUsageEnabled) {
-        return [
-          {
-            dir: authPath,
-            volumeId: "",
-            files: null,
-            message: "Cursor account usage is off on this environment.",
-            action: "enableCursorKeychain",
-          },
-        ];
-      }
       if (loginUnavailable) {
         return [
           {

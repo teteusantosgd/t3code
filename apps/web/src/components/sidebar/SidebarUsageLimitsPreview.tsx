@@ -24,7 +24,9 @@ import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { readUsagePagePreferences, saveUsagePagePreferences } from "../usage/usagePagePreferences";
 import {
   hasSidebarUsagePreview,
+  SIDEBAR_PROVIDER_LIMITS_KEY,
   sidebarPreviewColumns,
+  sidebarPreviewPools,
   sidebarPreviewResetLabel,
   windowsForSidebarPreview,
 } from "./usageLimitsPreviewModel";
@@ -120,10 +122,15 @@ export function SidebarUsageLimitsPreview({ className }: { readonly className?: 
   const navigate = useNavigate();
   const now = useLimitsNow();
   const [expanded, setExpanded] = useLocalStorage(LIMITS_SHELF_EXPANDED_KEY, true, Schema.Boolean);
+  const [showProviderLimits] = useLocalStorage(SIDEBAR_PROVIDER_LIMITS_KEY, true, Schema.Boolean);
   const toggleExpanded = useCallback(() => setExpanded((value) => !value), [setExpanded]);
   const pools = useMemo(
-    () => collectLimitPools(collectLimitAccounts(presentations), now),
-    [now, presentations],
+    () =>
+      sidebarPreviewPools(
+        collectLimitPools(collectLimitAccounts(presentations), now),
+        showProviderLimits,
+      ),
+    [now, presentations, showProviderLimits],
   );
   const visible = hasSidebarUsagePreview(pools);
 

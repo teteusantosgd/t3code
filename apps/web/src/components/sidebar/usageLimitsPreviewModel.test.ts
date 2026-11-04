@@ -4,6 +4,7 @@ import { describe, expect, it } from "vite-plus/test";
 
 import {
   hasSidebarUsagePreview,
+  sidebarPreviewPools,
   sidebarPreviewResetLabel,
   windowsForSidebarPreview,
 } from "./usageLimitsPreviewModel";
@@ -69,6 +70,33 @@ describe("windowsForSidebarPreview", () => {
       window("monthly", "total", "Monthly"),
     ];
     expect(windowsForSidebarPreview(windows).map((entry) => entry.label)).toEqual(["Monthly"]);
+  });
+});
+
+describe("windowsForSidebarPreview for Cursor", () => {
+  it("shows only Overall, not the per-pool rows", () => {
+    const windows = [
+      window("monthly", "totalPercentUsed", "Overall"),
+      window("monthly", "autoPercentUsed", "Cursor Models"),
+      window("monthly", "apiPercentUsed", "Other Models"),
+    ];
+    expect(windowsForSidebarPreview(windows).map((entry) => entry.id)).toEqual([
+      "totalPercentUsed",
+    ]);
+  });
+});
+
+describe("sidebarPreviewPools", () => {
+  const pool = (driver: string) => ({
+    driver: ProviderDriverKind.make(driver),
+    accounts: [],
+    windows: [window("session", "primary", "Session")],
+  });
+
+  it("drops Cursor and OpenCode when the sidebar toggle is off", () => {
+    const pools = [pool("codex"), pool("cursor"), pool("opencode")];
+    expect(sidebarPreviewPools(pools, false).map((entry) => entry.driver)).toEqual(["codex"]);
+    expect(sidebarPreviewPools(pools, true)).toEqual(pools);
   });
 });
 

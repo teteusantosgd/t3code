@@ -189,8 +189,7 @@ describe("searchSettings", () => {
       "network-access",
       "publish-agent-activity",
       "provider-health-check-interval",
-      "cursor-keychain-usage",
-      "opencode-usage-limits",
+      "sidebar-provider-limits",
       "source-control-writer-model",
       "review-guide-model",
       "review-guide-instructions",
@@ -204,25 +203,6 @@ describe("searchSettings", () => {
       "days-before-auto-settle",
     ]);
     expect(available.map((item) => item.id).filter((id) => gatedIds.has(id))).toEqual([]);
-  });
-
-  it("offers Cursor Keychain settings only when a macOS provider environment is available", () => {
-    const availability = {
-      hasCloudPublicConfig: false,
-      hasEnvironment: true,
-      hasProviderSettingsEnvironment: true,
-      hasMacProviderSettingsEnvironment: false,
-      canManageLocalBackend: false,
-      isWslSettingsRowVisible: false,
-      hasThreadAutoSettlement: false,
-    };
-    const itemIds = (macAvailable: boolean) =>
-      filterAvailableSettingsSearchItems({
-        ...availability,
-        hasMacProviderSettingsEnvironment: macAvailable,
-      }).map((item) => item.id);
-    expect(itemIds(false)).not.toContain("cursor-keychain-usage");
-    expect(itemIds(true)).toContain("cursor-keychain-usage");
   });
 
   it("keeps the local toggle searchable without offering hidden host publishing controls", () => {

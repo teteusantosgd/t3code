@@ -13,7 +13,7 @@ import {
   type LimitAccount,
   type LimitPoolWindow,
 } from "@t3tools/shared/usageLimits";
-import { Fragment, type ReactNode, useId, useState } from "react";
+import { Fragment, useId, useState } from "react";
 import { Linking, Pressable, ScrollView, View } from "react-native";
 import { Defs, Path, Pattern, Rect, Svg } from "react-native-svg";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -216,12 +216,10 @@ export function UsageLimitsSection({
   now,
   failedLabels,
   selectedEnvironmentIds,
-  cursorPrompt,
 }: {
   readonly now: number;
   readonly failedLabels: readonly string[];
   readonly selectedEnvironmentIds: ReadonlySet<EnvironmentId> | null;
-  readonly cursorPrompt?: ReactNode;
 }) {
   const presentations = useAtomValue(environmentPresentations.presentationsAtom);
   const selected =
@@ -232,17 +230,11 @@ export function UsageLimitsSection({
   const notices = collectLimitNotices(selected);
   const externalLinks = collectExternalUsageLinks(selected);
   const colors = useProviderColors();
-  const cursorPromptAt =
-    Math.max(
-      pools.findIndex((pool) => pool.driver === "codex"),
-      pools.findIndex((pool) => pool.driver === "claudeAgent"),
-    ) + 1;
   return (
     <View className="gap-6">
       {pools.length === 0 &&
       notices.length === 0 &&
       failedLabels.length === 0 &&
-      !cursorPrompt &&
       externalLinks.length === 0 ? (
         <Text className="py-12 text-center text-base text-foreground-muted">
           {selected.size === 0
@@ -250,11 +242,10 @@ export function UsageLimitsSection({
             : "No provider on the selected environments reports subscription limits."}
         </Text>
       ) : null}
-      {pools.map((pool, index) => {
+      {pools.map((pool) => {
         const windows = displayLimitWindows(pool);
         return (
           <Fragment key={pool.driver}>
-            {index === cursorPromptAt ? cursorPrompt : null}
             <View className="gap-3">
               <View className="flex-row items-center gap-2 px-1">
                 <ProviderIcon provider={pool.driver} size={18} />
@@ -289,7 +280,6 @@ export function UsageLimitsSection({
           </Fragment>
         );
       })}
-      {cursorPromptAt === pools.length ? cursorPrompt : null}
       {externalLinks.map((link) => (
         <View key={link.url} className="gap-3 rounded-xl border border-border-subtle p-4">
           <Text className="text-base font-t3-medium text-foreground">{link.label}</Text>

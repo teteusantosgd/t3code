@@ -584,7 +584,6 @@ export const make = Effect.gen(function* () {
     readonly hostId?: string;
     readonly status?: UsageSource["status"];
     readonly message?: string;
-    readonly action?: UsageSource["action"];
     /** Parsed records per file, or `null` when the directory does not exist. */
     readonly files:
       | readonly { readonly path: string; readonly records: readonly UsageRecord[] }[]
@@ -796,7 +795,7 @@ export const make = Effect.gen(function* () {
 
     for (const [
       index,
-      { provider, dir, volumeId, files, status, message, action, refreshing, hostId: sourceHostId },
+      { provider, dir, volumeId, files, status, message, refreshing, hostId: sourceHostId },
     ] of scannedDirs.entries()) {
       let scannedFiles = 0;
       let skippedFiles = 0;
@@ -849,7 +848,6 @@ export const make = Effect.gen(function* () {
         distinctSessions: sessionIds.size,
         message:
           message ?? (files === null ? "No transcript directory on this environment." : null),
-        ...(action ? { action } : {}),
         ...(refreshing ? { refreshing } : {}),
       });
     }

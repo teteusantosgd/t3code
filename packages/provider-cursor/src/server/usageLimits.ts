@@ -64,7 +64,6 @@ export function cursorUsageResponseToLimits(
 export const readCursorUsageLimits = Effect.fn("readCursorUsageLimits")(function* (
   settings: Pick<CursorSettings, "apiEndpoint">,
   environment: NodeJS.ProcessEnv = process.env,
-  allowKeychain = false,
 ) {
   const checkedAt = DateTime.formatIso(yield* DateTime.now);
   return yield* Effect.gen(function* () {
@@ -90,13 +89,6 @@ export const readCursorUsageLimits = Effect.fn("readCursorUsageLimits")(function
       });
     }
     if (!token && platform === "darwin" && credentialStore !== "file") {
-      if (!allowKeychain) {
-        return makeUnavailableUsageLimits({
-          checkedAt,
-          reason: "unsupported",
-          message: "Enable Cursor account usage in T3 Code to read its Keychain login.",
-        });
-      }
       if (endpoint !== DEFAULT_CURSOR_API_ENDPOINT) {
         return makeUnavailableUsageLimits({
           checkedAt,

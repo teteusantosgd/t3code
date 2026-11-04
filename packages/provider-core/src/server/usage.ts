@@ -138,7 +138,6 @@ export interface ProviderUsageScan {
   readonly hostId?: string;
   readonly status?: UsageSource["status"];
   readonly message?: string;
-  readonly action?: UsageSource["action"];
   /** Parsed records per file, or `null` when the source does not exist. */
   readonly files:
     | readonly { readonly path: string; readonly records: readonly UsageRecord[] }[]

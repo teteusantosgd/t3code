@@ -1,11 +1,10 @@
 import type { EnvironmentId, UnifiedSettings } from "@t3tools/contracts";
-import { useAtomValue } from "@effect/atom-react";
+import * as Schema from "effect/Schema";
 import { PlusIcon } from "lucide-react";
 import { useState } from "react";
 
+import { useLocalStorage } from "../../hooks/useLocalStorage";
 import { useUpdateEnvironmentSettings } from "../../hooks/useSettings";
-import { serverEnvironment } from "../../state/server";
-import { useAtomCommand } from "../../state/use-atom-command";
 import {
   AlertDialog,
   AlertDialogClose,
@@ -17,6 +16,7 @@ import {
 } from "../ui/alert-dialog";
 import { Button } from "../ui/button";
 import { Switch } from "../ui/switch";
+import { SIDEBAR_PROVIDER_LIMITS_KEY } from "../sidebar/usageLimitsPreviewModel";
 import { AddUsageLimitSourceDialog } from "./AddUsageLimitSourceDialog";
 import { searchableSetting } from "./settingsSearch";
 import { SettingsRow, SettingsSection } from "./settingsLayout";
@@ -26,60 +26,21 @@ export function UsageProviderSettings({
   environmentId,
   environmentLabel,
   sources,
-  cursorKeychainUsageEnabled,
-  openCodeUsageLimitsEnabled,
   readOnly,
 }: {
   readonly environmentId: EnvironmentId;
   readonly environmentLabel: string;
   readonly sources: UnifiedSettings["usageLimitSources"];
-  readonly cursorKeychainUsageEnabled: boolean;
-  readonly openCodeUsageLimitsEnabled: boolean;
   readonly readOnly: boolean;
 }) {
   const updateSettings = useUpdateEnvironmentSettings(environmentId);
-  const updateUsageSettings = useAtomCommand(serverEnvironment.updateSettings, {
-    label: "update usage limit settings",
-  });
-  const refreshProviders = useAtomCommand(serverEnvironment.refreshProviders, {
-    reportFailure: false,
-  });
-  const platform = useAtomValue(serverEnvironment.configValueAtom(environmentId))?.environment
-    .platform;
   const [adding, setAdding] = useState(false);
-  const [updatingCursor, setUpdatingCursor] = useState(false);
-  const [updatingOpenCode, setUpdatingOpenCode] = useState(false);
+  const [sidebarProviderLimits, setSidebarProviderLimits] = useLocalStorage(
+    SIDEBAR_PROVIDER_LIMITS_KEY,
+    true,
+    Schema.Boolean,
+  );
   const entries = Object.entries(sources);
-
-  const setCursorUsageEnabled = async (enabled: boolean) => {
-    setUpdatingCursor(true);
-    try {
-      const result = await updateUsageSettings({
-        environmentId,
-        input: { patch: { cursorKeychainUsageEnabled: enabled } },
-      });
-      if (result._tag === "Success") {
-        await refreshProviders({ environmentId, input: {} });
-      }
-    } finally {
-      setUpdatingCursor(false);
-    }
-  };
-
-  const setOpenCodeUsageLimitsEnabled = async (enabled: boolean) => {
-    setUpdatingOpenCode(true);
-    try {
-      const result = await updateUsageSettings({
-        environmentId,
-        input: { patch: { openCodeUsageLimitsEnabled: enabled } },
-      });
-      if (result._tag === "Success") {
-        await refreshProviders({ environmentId, input: {} });
-      }
-    } finally {
-      setUpdatingOpenCode(false);
-    }
-  };
 
   return (
     <>
@@ -94,31 +55,15 @@ export function UsageProviderSettings({
           ) : null
         }
       >
-        {platform?.os === "darwin" ? (
-          <SettingsRow
-            id="cursor-keychain-usage"
-            title="Cursor account usage"
-            description="Read your existing Cursor CLI login from macOS Keychain to show account history and monthly limits. macOS may ask you to allow access."
-            control={
-              <Switch
-                aria-label="Cursor account usage"
-                checked={cursorKeychainUsageEnabled}
-                disabled={readOnly || updatingCursor}
-                onCheckedChange={(enabled) => void setCursorUsageEnabled(enabled)}
-              />
-            }
-          />
-        ) : null}
         <SettingsRow
-          id="opencode-usage-limits"
-          title="OpenCode Go usage"
-          description="Read OpenCode Go session, weekly, and monthly limits for Limits and the sidebar glance."
+          id="sidebar-provider-limits"
+          title="Cursor and OpenCode Go in sidebar"
+          description="Show Cursor and OpenCode Go limits in the sidebar glance. Limits always lists every provider. This browser only."
           control={
             <Switch
-              aria-label="OpenCode Go usage"
-              checked={openCodeUsageLimitsEnabled}
-              disabled={readOnly || updatingOpenCode}
-              onCheckedChange={(enabled) => void setOpenCodeUsageLimitsEnabled(enabled)}
+              aria-label="Cursor and OpenCode Go in sidebar"
+              checked={sidebarProviderLimits}
+              onCheckedChange={setSidebarProviderLimits}
             />
           }
         />

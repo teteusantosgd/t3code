@@ -677,18 +677,10 @@ export const SETTINGS_SEARCH_ITEMS = [
     providerSettingsOnly: true,
   },
   {
-    id: "cursor-keychain-usage",
-    title: "Cursor account usage",
+    id: "sidebar-provider-limits",
+    title: "Cursor and OpenCode Go in sidebar",
     to: "/settings/providers",
-    searchTerms: ["cursor macOS keychain usage tokens cost limits permission"],
-    providerSettingsOnly: true,
-    macProviderSettingsOnly: true,
-  },
-  {
-    id: "opencode-usage-limits",
-    title: "OpenCode Go usage",
-    to: "/settings/providers",
-    searchTerms: ["opencode go session weekly monthly limits sidebar usage quota"],
+    searchTerms: ["cursor opencode go session weekly monthly limits sidebar usage quota"],
     providerSettingsOnly: true,
   },
   {
