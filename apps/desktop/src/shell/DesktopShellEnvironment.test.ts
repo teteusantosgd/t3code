@@ -182,6 +182,7 @@ describe("DesktopShellEnvironment", () => {
             const startup = yield* service.installIntoProcess.pipe(Effect.forkChild);
             yield* Deferred.await(started);
             assert.isDefined(startup.pollUnsafe());
+            assert.isFalse(yield* Fiber.join(startup));
             yield* Deferred.succeed(release, undefined);
             return yield* service.awaitDiscovery;
           }),
@@ -249,7 +250,7 @@ describe("DesktopShellEnvironment", () => {
           }),
           use: (service) =>
             Effect.gen(function* () {
-              yield* service.installIntoProcess;
+              assert.isTrue(yield* service.installIntoProcess);
               yield* service.installIntoProcess;
               assert.equal(env.PATH, "/old/bin:/usr/bin:/launcher/bin");
               assert.equal(env.SSH_AUTH_SOCK, "/current-session.sock");
@@ -602,6 +603,31 @@ describe("DesktopShellEnvironment", () => {
       assert.deepEqual(commands, ["/opt/homebrew/bin/nu", "/bin/zsh", "/bin/launchctl"]);
       assert.equal(env.PATH, "/opt/homebrew/bin:/usr/bin");
       assert.isFalse(prepared);
+    }),
+  );
+
+  it.effect("waits past five seconds for a slow macOS login shell", () =>
+    Effect.gen(function* () {
+      const env: NodeJS.ProcessEnv = { SHELL: "/bin/zsh", PATH: "/usr/bin" };
+      const spawned = yield* Deferred.make<void>();
+      const release = yield* Deferred.make<void>();
+      const fiber = yield* runShellEnvironment({
+        env,
+        platform: "darwin",
+        handler: () => "",
+        processSpawner: ChildProcessSpawner.make(() =>
+          Deferred.succeed(spawned, undefined).pipe(
+            Effect.andThen(Deferred.await(release)),
+            Effect.as(makeProcess(envOutput({ PATH: "/slow/bin" }))),
+          ),
+        ),
+      }).pipe(Effect.forkChild({ startImmediately: true }));
+
+      yield* Deferred.await(spawned);
+      yield* TestClock.adjust("10 seconds");
+      yield* Deferred.succeed(release, undefined);
+      assert.isTrue(yield* Fiber.join(fiber));
+      assert.equal(env.PATH, "/slow/bin:/usr/bin");
     }),
   );
 

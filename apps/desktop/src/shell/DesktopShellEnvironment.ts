@@ -114,6 +114,8 @@ const LOCALE_ENV_NAMES = ["LANG", "LC_ALL", "LC_CTYPE"] as const;
 const FALLBACK_LC_CTYPE = "en_US.UTF-8";
 const WINDOWS_SHELL_CANDIDATES = ["pwsh.exe", "powershell.exe"] as const;
 const LOGIN_SHELL_TIMEOUT = Duration.seconds(5);
+// Discovery runs in the background, and heavy zsh profiles exceed 5s while the app boots.
+const POSIX_LOGIN_SHELL_TIMEOUT = Duration.seconds(15);
 const LAUNCHCTL_TIMEOUT = Duration.seconds(2);
 const PROCESS_TERMINATE_GRACE = Duration.seconds(1);
 
@@ -336,7 +338,7 @@ const readLoginShellEnvironment = (
         command: shell,
         args: ["-ilc", buildEnvironmentCaptureCommand(shell, names)],
         env,
-        timeout: LOGIN_SHELL_TIMEOUT,
+        timeout: POSIX_LOGIN_SHELL_TIMEOUT,
       }).pipe(Effect.map((output) => extractEnvironment(output, names)));
 
 const readLaunchctlPath = (env: NodeJS.ProcessEnv) =>
@@ -628,7 +630,8 @@ export const make = Effect.gen(function* () {
       const cache = yield* fileSystem
         .readFileString(cachePath)
         .pipe(Effect.flatMap(decodeCache), Effect.option);
-      if (Option.isSome(cache) && cache.value.key === key) {
+      const cacheHit = Option.isSome(cache) && cache.value.key === key;
+      if (cacheHit) {
         const cached = Object.fromEntries(
           CACHED_ENV_NAMES.flatMap((name) => {
             const value = cache.value.environment[name];
@@ -654,7 +657,8 @@ export const make = Effect.gen(function* () {
         );
       }
       yield* Effect.forkIn(refresh, scope);
-      return true;
+      // On a cache miss the backend must hydrate PATH itself; providers probe before discovery lands.
+      return cacheHit;
     }).pipe(Effect.withSpan("desktop.shellEnvironment.installIntoProcess")),
   );
   const updates = Stream.unwrap(
