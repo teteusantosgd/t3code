@@ -310,6 +310,14 @@ export const SETTINGS_SEARCH_ITEMS = [
     targetId: "appearance",
   },
   {
+    id: "clean-sidebar",
+    title: "Clean sidebar",
+    to: "/settings/appearance",
+    searchTerms: [
+      "hide branch pull request PR agent model provider account terminal icons badges threads",
+    ],
+  },
+  {
     // Prefixed because the slider control already owns the `appearance-contrast` id.
     id: "setting-appearance-contrast",
     title: "Contrast",

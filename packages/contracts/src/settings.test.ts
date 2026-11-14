@@ -320,6 +320,18 @@ describe("ClientSettings notifications", () => {
   });
 });
 
+describe("ClientSettings interface preferences", () => {
+  it.each(["cleanSidebarEnabled"] as const)(
+    "defaults %s off for older settings and preserves an explicit choice",
+    (key) => {
+      expect(decodeClientSettings({})[key]).toBe(false);
+      const enabled = decodeClientSettings({ [key]: true });
+      expect(decodeClientSettings(encodeClientSettings(enabled))[key]).toBe(true);
+      expect(decodeClientSettingsPatch({ [key]: false })).toEqual({ [key]: false });
+    },
+  );
+});
+
 describe("ClientSettings quit confirmation", () => {
   it.each([
     [true, "hold"],

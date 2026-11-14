@@ -164,6 +164,19 @@ export function AppearanceSettingsPanel() {
 
       <SettingsSection id="appearance-interface" title="Interface">
         <SettingsRow
+          {...searchableSetting("clean-sidebar")}
+          description="Hide branch, PR, agent, account, and terminal indicators from the thread list."
+          control={
+            <Switch
+              checked={settings.cleanSidebarEnabled}
+              onCheckedChange={(checked) =>
+                updateSettings({ cleanSidebarEnabled: Boolean(checked) })
+              }
+              aria-label="Clean sidebar"
+            />
+          }
+        />
+        <SettingsRow
           {...searchableSetting("setting-appearance-contrast")}
           description="Adjust the contrast of colors and borders across the interface."
           resetAction={
