@@ -289,6 +289,7 @@ const makeStubTerminalManager = (): StubTerminalManager => {
       clear,
       close,
       closeIdle: () => Effect.void,
+      closeOnSettle: () => Effect.void,
       subscribe,
       subscribeMetadata,
       readAllTerminalMetadata,
@@ -836,13 +837,24 @@ it.effect.each([
     terminalCredential(liveId, new Set(["preview", "pull-requests"])),
     "MCP credential does not grant the terminal capability.",
   ],
-  ["OAuth client outside any thread", outsideClient, "needs an agent running inside T3 Code"],
 ] as const)("terminal_open from a %s is refused without allocating", ([, scope, message]) =>
   Effect.gen(function* () {
     const stub = makeStubTerminalManager();
     const result = yield* callRegistered(stub, scope, "terminal_open", { cwd: "/repo" });
     expect(result.isError).toBe(true);
     expect(resultText(result)).toContain(message);
+    expect(stub.allocatedByManager).toBe(0);
+    expect(stub.openedByName).toEqual([]);
+  }),
+);
+
+it.effect("terminal_open is not offered to an OAuth client outside any thread", () =>
+  Effect.gen(function* () {
+    const stub = makeStubTerminalManager();
+    const failure = yield* callRegistered(stub, outsideClient, "terminal_open", {
+      cwd: "/repo",
+    }).pipe(Effect.flip);
+    expect(failure.message).toContain("Tool 'terminal_open' not found");
     expect(stub.allocatedByManager).toBe(0);
     expect(stub.openedByName).toEqual([]);
   }),
@@ -886,7 +898,9 @@ it.effect(
         terminalId: "term-1",
       });
       expect(read.isError).toBe(false);
-      const outside = yield* callRegistered(stub, outsideClient, "terminal_list", {});
-      expect(outside.isError).toBe(true);
+      const outside = yield* callRegistered(stub, outsideClient, "terminal_list", {}).pipe(
+        Effect.flip,
+      );
+      expect(outside.message).toContain("Tool 'terminal_list' not found");
     }),
 );

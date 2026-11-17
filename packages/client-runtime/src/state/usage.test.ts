@@ -191,16 +191,17 @@ describe("manual usage refresh", () => {
 });
 
 describe("limits refresh cooldown", () => {
-  it("runs a fresh check after an in-flight check when settings change", async () => {
-    const id = EnvironmentId.make("limits-after-enable");
+  it("shares an in-flight check and skips duplicate automatic refreshes", async () => {
+    const id = EnvironmentId.make("limits-in-flight");
     const oldCheck = Promise.withResolvers<string>();
     const first = refreshUsageLimits(id, () => oldCheck.promise, true);
     const newCheck = vi.fn(async () => "new limits");
-    const afterEnable = refreshUsageLimits(id, newCheck, false, true);
+    const manual = refreshUsageLimits(id, newCheck);
+    expect(await refreshUsageLimits(id, newCheck, true)).toBeUndefined();
     expect(newCheck).not.toHaveBeenCalled();
     oldCheck.resolve("old limits");
     expect(await first).toBe("old limits");
-    expect(await afterEnable).toBe("new limits");
-    expect(newCheck).toHaveBeenCalledTimes(1);
+    expect(await manual).toBe("old limits");
+    expect(newCheck).not.toHaveBeenCalled();
   });
 });

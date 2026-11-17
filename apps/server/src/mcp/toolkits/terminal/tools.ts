@@ -5,7 +5,7 @@ import {
   TerminalSummary,
 } from "@t3tools/contracts";
 import * as Schema from "effect/Schema";
-import { Tool, Toolkit } from "effect/ai";
+import { McpSchema, Tool, Toolkit } from "effect/ai";
 
 import * as ThreadManagementService from "../../../orchestration-v2/ThreadManagementService.ts";
 import * as TerminalManager from "../../../terminal/Manager.ts";
@@ -217,7 +217,10 @@ export const TerminalCloseToolResult = Schema.Struct({
 export type TerminalCloseToolResult = typeof TerminalCloseToolResult.Type;
 
 const shellTool = <T extends Tool.Any>(tool: T): T =>
-  tool.annotate(Tool.OpenWorld, true).annotate(Tool.Destructive, true) as T;
+  tool
+    .annotate(Tool.OpenWorld, true)
+    .annotate(Tool.Destructive, true)
+    .annotate(McpSchema.EnabledWhen, McpInvocationContext.hiddenFromOutsideClients) as T;
 
 const readonlyShellTool = <T extends Tool.Any>(tool: T): T =>
   shellTool(tool)
