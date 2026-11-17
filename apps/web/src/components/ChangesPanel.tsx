@@ -3,6 +3,7 @@ import { useParams } from "@tanstack/react-router";
 import type { EnvironmentId, ThreadId, VcsChangedFile, VcsStatusResult } from "@t3tools/contracts";
 import { AsyncResult } from "effect/reactivity";
 import {
+  BotIcon,
   ChevronDownIcon,
   ChevronRightIcon,
   FolderTreeIcon,
@@ -11,7 +12,6 @@ import {
   MinusIcon,
   MoreHorizontalIcon,
   PlusIcon,
-  SparklesIcon,
   Trash2Icon,
 } from "lucide-react";
 import { RefreshIcon } from "~/components/ui/refresh-icon";
@@ -329,24 +329,20 @@ function RepositoryChangesCard(props: {
     }
     setIsGeneratingMessage(true);
     setGenerationNotice(null);
-    try {
-      const result = await generateCommitMessage({
-        environmentId,
-        input: {
-          cwd: model.cwd,
-          scope: stagedCount > 0 ? "staged" : "all",
-          threadId: props.threadId,
-        },
-      });
-      if (AsyncResult.isSuccess(result)) {
-        if (result.value.message === null) {
-          setGenerationNotice("No local changes to generate a commit message.");
-        } else {
-          props.onCommitMessageChange(result.value.message);
-        }
+    const result = await generateCommitMessage({
+      environmentId,
+      input: {
+        cwd: model.cwd,
+        scope: stagedCount > 0 ? "staged" : "all",
+        threadId: props.threadId,
+      },
+    }).finally(() => setIsGeneratingMessage(false));
+    if (AsyncResult.isSuccess(result)) {
+      if (result.value.message === null) {
+        setGenerationNotice("No local changes to generate a commit message.");
+      } else {
+        props.onCommitMessageChange(result.value.message);
       }
-    } finally {
-      setIsGeneratingMessage(false);
     }
   };
 
@@ -599,7 +595,7 @@ function RepositoryChangesCard(props: {
                         {isGeneratingMessage ? (
                           <Spinner size="sm" />
                         ) : (
-                          <SparklesIcon className="size-3.5" />
+                          <BotIcon className="size-3.5" />
                         )}
                       </Button>
                     }

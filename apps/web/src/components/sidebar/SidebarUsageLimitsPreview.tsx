@@ -137,22 +137,18 @@ export function SidebarUsageLimitsPreview({ className }: { readonly className?: 
   };
 
   const refreshLimits = useEffectEvent(async (automatic: boolean) => {
-    try {
-      await Promise.all(
-        Array.from(presentations, ([environmentId, presentation]) => {
-          if (presentation.connection.phase !== "connected" || presentation.serverConfig === null) {
-            return;
-          }
-          return refreshUsageLimits(
-            environmentId,
-            () => refreshProviders({ environmentId, input: {} }),
-            automatic,
-          );
-        }),
-      );
-    } finally {
-      bumpLimitsNow();
-    }
+    await Promise.all(
+      Array.from(presentations, ([environmentId, presentation]) => {
+        if (presentation.connection.phase !== "connected" || presentation.serverConfig === null) {
+          return;
+        }
+        return refreshUsageLimits(
+          environmentId,
+          () => refreshProviders({ environmentId, input: {} }),
+          automatic,
+        );
+      }),
+    ).finally(bumpLimitsNow);
   });
 
   const connectedKey = [...presentations]

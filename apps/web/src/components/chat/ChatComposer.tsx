@@ -962,7 +962,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   const selectedProviderStatus = selectedProviderEntry?.snapshot ?? null;
   // Voice follows the provider that owns the thread; a draft without a thread
   // shell follows the composer's selection and waits for its first message.
-  const voiceThread = activeThread ?? props.activeThreadShell ?? null;
+  const voiceThread = activeThread ?? null;
   const voiceProviderInstanceId = voiceThread?.providerInstanceId ?? selectedInstanceId;
   const voiceThreadHasMessages = voiceThread?.latestUserMessageAt != null;
   const voiceThreadHasSession = voiceThread?.activeProviderThreadId != null;

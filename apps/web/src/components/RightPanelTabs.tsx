@@ -144,7 +144,8 @@ export interface RightPanelTabsProps {
   onAddBrowserInProfile: (profileId: string) => void;
   onAddTerminal: () => void;
   onAddDiff: () => void;
-  onAddChanges: () => void;
+  /** Absent where the Changes surface is not offered. */
+  onAddChanges?: (() => void) | undefined;
   onAddFiles: () => void;
   onAddPullRequest: () => void;
   onAddPullRequests: () => void;
@@ -154,7 +155,7 @@ export interface RightPanelTabsProps {
   browserAvailable: boolean;
   terminalAvailable: boolean;
   diffAvailable: boolean;
-  changesAvailable: boolean;
+  changesAvailable?: boolean | undefined;
   filesAvailable: boolean;
   pullRequestAvailable: boolean;
   pullRequestsAvailable: boolean;
@@ -329,7 +330,8 @@ function RightPanelEmptyState(props: {
   browserProfiles: ReadonlyArray<{ readonly id: string; readonly name: string }>;
   onAddTerminal: () => void;
   onAddDiff: () => void;
-  onAddChanges: () => void;
+  /** Absent where the Changes surface is not offered. */
+  onAddChanges?: (() => void) | undefined;
   onAddFiles: () => void;
   onAddPullRequest: () => void;
   onAddPullRequests: () => void;
@@ -339,7 +341,7 @@ function RightPanelEmptyState(props: {
   browserAvailable: boolean;
   terminalAvailable: boolean;
   diffAvailable: boolean;
-  changesAvailable: boolean;
+  changesAvailable?: boolean | undefined;
   filesAvailable: boolean;
   pullRequestAvailable: boolean;
   pullRequestsAvailable: boolean;
@@ -386,9 +388,9 @@ function RightPanelEmptyState(props: {
       label: "Changes",
       icon: GitCommit,
       shortcut: "C",
-      available: props.changesAvailable,
+      available: props.changesAvailable === true && props.onAddChanges !== undefined,
       disabledReason: SURFACE_UNAVAILABLE_HINTS.changes,
-      onClick: props.onAddChanges,
+      onClick: props.onAddChanges ?? (() => {}),
       badgeCount: 0,
     },
     {
@@ -1193,9 +1195,9 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
       label: "Changes",
       icon: GitCommit,
       shortcut: "C",
-      available: props.changesAvailable,
+      available: props.changesAvailable === true && props.onAddChanges !== undefined,
       disabledReason: SURFACE_DISABLED_REASONS.changes,
-      onClick: props.onAddChanges,
+      onClick: props.onAddChanges ?? (() => {}),
     },
     {
       label: "Pull request",
